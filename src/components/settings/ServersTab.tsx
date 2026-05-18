@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
-import { AlertTriangle, CheckCircle2, Lock, LogOut, Plus, Server, Sparkles, Trash2, User, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Lock, LogOut, Pencil, Plus, Power, Server, Sparkles, Trash2, User, Wifi, WifiOff } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import type { ServerProfile } from '../../store/authStoreTypes';
 import { pingWithCredentials, scheduleInstantMixProbeForServer } from '../../api/subsonic';
@@ -13,6 +13,7 @@ import { serverListDisplayLabel } from '../../utils/server/serverDisplayName';
 import { switchActiveServer } from '../../utils/server/switchActiveServer';
 import { AddServerForm } from './AddServerForm';
 import { ServerGripHandle } from './ServerGripHandle';
+import ServerScanActions from './ServerScanActions';
 
 const AUDIOMUSE_NV_PLUGIN_URL = 'https://github.com/NeptuneHub/AudioMuse-AI-NV-plugin';
 
@@ -30,6 +31,7 @@ export function ServersTab({
 
   const [connStatus, setConnStatus] = useState<Record<string, 'idle' | 'testing' | 'ok' | 'error'>>({});
   const [showAddForm, setShowAddForm] = useState<boolean>(initialInvite != null);
+  const [editingServerId, setEditingServerId] = useState<string | null>(null);
   const [pastedServerInvite, setPastedServerInvite] = useState<ServerMagicPayload | null>(initialInvite);
   const [serverContainerEl, setServerContainerEl] = useState<HTMLDivElement | null>(null);
   const [serverDropTarget, setServerDropTarget] = useState<ServerDropTarget>(null);
@@ -168,6 +170,31 @@ export function ServersTab({
     }
   };
 
+  // Edit saves unconditionally — ping result becomes a post-save status
+  // indicator (analog zum existing Test-Button) rather than blocking the
+  // save. Lets users update a profile even when the server is currently
+  // unreachable.
+  const handleEditServer = async (id: string, data: Omit<ServerProfile, 'id'>) => {
+    setEditingServerId(null);
+    auth.updateServer(id, data);
+    setConnStatus(s => ({ ...s, [id]: 'testing' }));
+    try {
+      const ping = await pingWithCredentials(data.url, data.username, data.password);
+      if (ping.ok) {
+        const identity = {
+          type: ping.type,
+          serverVersion: ping.serverVersion,
+          openSubsonic: ping.openSubsonic,
+        };
+        auth.setSubsonicServerIdentity(id, identity);
+        scheduleInstantMixProbeForServer(id, data.url, data.username, data.password, identity);
+      }
+      setConnStatus(s => ({ ...s, [id]: ping.ok ? 'ok' : 'error' }));
+    } catch {
+      setConnStatus(s => ({ ...s, [id]: 'error' }));
+    }
+  };
+
   const handleLogout = () => {
     auth.logout();
     navigate('/login');
@@ -195,6 +222,16 @@ export function ServersTab({
             style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}
           >
             {auth.servers.map((srv, srvIdx) => {
+              if (editingServerId === srv.id) {
+                return (
+                  <AddServerForm
+                    key={srv.id}
+                    editingServer={srv}
+                    onSave={(data) => handleEditServer(srv.id, data)}
+                    onCancel={() => setEditingServerId(null)}
+                  />
+                );
+              }
               const isActive = srv.id === auth.activeServerId;
               const status = connStatus[srv.id];
               const isBefore = psyDragState.isDragging && serverDropTarget?.idx === srvIdx && serverDropTarget.before;
@@ -240,14 +277,17 @@ export function ServersTab({
                       {status === 'ok' && <CheckCircle2 size={16} style={{ color: 'var(--positive)' }} />}
                       {status === 'error' && <WifiOff size={16} style={{ color: 'var(--danger)' }} />}
                       {status === 'testing' && <div className="spinner" style={{ width: 16, height: 16 }} />}
+                      <ServerScanActions serverId={srv.id} variant="card" />
                       <button
                         className="btn btn-surface"
                         style={{ fontSize: 12, padding: '4px 10px' }}
                         onClick={() => testConnection(srv)}
                         disabled={status === 'testing'}
+                        data-tooltip={t('settings.testBtn')}
+                        aria-label={t('settings.testBtn')}
                       >
                         <Wifi size={13} />
-                        {t('settings.testBtn')}
+                        <span className="server-card-btn-label">{t('settings.testBtn')}</span>
                       </button>
                       {!isActive && (
                         <button
@@ -256,10 +296,26 @@ export function ServersTab({
                           onClick={() => switchToServer(srv)}
                           disabled={status === 'testing'}
                           id={`settings-use-server-${srv.id}`}
+                          data-tooltip={t('settings.useServer')}
+                          aria-label={t('settings.useServer')}
                         >
-                          {t('settings.useServer')}
+                          <Power size={13} />
+                          <span className="server-card-btn-label">{t('settings.useServer')}</span>
                         </button>
                       )}
+                      <button
+                        className="btn btn-ghost"
+                        style={{ padding: '4px 8px' }}
+                        onClick={() => {
+                          setShowAddForm(false);
+                          setPastedServerInvite(null);
+                          setEditingServerId(srv.id);
+                        }}
+                        data-tooltip={t('settings.editServer')}
+                        id={`settings-edit-server-${srv.id}`}
+                      >
+                        <Pencil size={14} />
+                      </button>
                       <button
                         className="btn btn-ghost"
                         style={{ color: 'var(--danger)', padding: '4px 8px' }}
