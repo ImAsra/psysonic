@@ -3,17 +3,19 @@
     Psysonic for NixOS / nixpkgs: installable app + dev shell.
 
     Packages:
-      nix build .#psysonic          # or .#default — desktop app (.desktop + icon); GDK_BACKEND=x11 (default, fewer WebKit surprises)
-      nix build .#psysonic-gdk-session   # same app, no forced GDK x11 — optional; can misbehave on some stacks (see nixos-install.md)
+      nix build .#psysonic          # or .#default — desktop app; GDK follows session (no wrapper pin)
+      nix build .#psysonic-gdk-session   # same derivation (back-compat alias); see nixos-install.md
+      nix build .#psysonic-x11-legacy    # legacy: GDK_BACKEND=x11 wrapper (old default)
       nix profile install .#psysonic
 
     Run (after build, or from any clone with flake):
       nix run .#psysonic
-      nix run .#psysonic-gdk-session
+      nix run .#psysonic-gdk-session   # identical to psysonic
+      nix run .#psysonic-x11-legacy    # GDK x11 pinned (former default wrap)
       nix run github:Psychotoxical/psysonic
 
     Development:
-      nix develop                   # mkShell (Rust/Node/WebKit deps + hooks)
+      nix develop                   # mkShell (Rust/Node/WebKit deps); same GDK idea as installable (no GDK pin)
       nix shell .#devShells.default # same environment without entering subshell semantics
       Local cargo output: .build-local/ (gitignored; not copied into flake source tarball)
 
@@ -87,9 +89,6 @@
             export GIO_EXTRA_MODULES="${pkgs.glib-networking}/lib/gio/modules''${GIO_EXTRA_MODULES:+:$GIO_EXTRA_MODULES}"
             export LLVM_COV="${pkgs.llvmPackages.llvm}/bin/llvm-cov"
             export LLVM_PROFDATA="${pkgs.llvmPackages.llvm}/bin/llvm-profdata"
-            export GDK_BACKEND=x11
-            export WEBKIT_DISABLE_COMPOSITING_MODE=1
-            export WEBKIT_DISABLE_DMABUF_RENDERER=1
             unset CI
           '';
 
@@ -106,28 +105,38 @@
           inherit upstreamMeta;
         };
 
-      psysonicGdkSessionFor =
+      # Same app with GDK_BACKEND pinned to X11 — previous default wrapper behaviour (see nixos-install.md).
+      psysonicX11LegacyFor =
         system:
         nixpkgs.legacyPackages.${system}.callPackage ./nix/psysonic.nix {
           src = self;
           inherit upstreamMeta;
-          forceGdkX11 = false;
+          forceGdkX11 = true;
         };
+
     in
     {
       devShells = forSystem (system: { default = mkShellFor system; });
 
-      packages = forSystem (system: {
-        psysonic = psysonicFor system;
-        psysonic-gdk-session = psysonicGdkSessionFor system;
-        default = psysonicFor system;
-      });
+      packages = forSystem (
+        system:
+        let
+          p = psysonicFor system;
+          pX11 = psysonicX11LegacyFor system;
+        in
+        {
+          psysonic = p;
+          psysonic-gdk-session = p;
+          psysonic-x11-legacy = pX11;
+          default = p;
+        }
+      );
 
       apps = forSystem (
         system:
         let
           p = psysonicFor system;
-          pGdk = psysonicGdkSessionFor system;
+          pX11 = psysonicX11LegacyFor system;
         in
         {
           default = {
@@ -140,9 +149,17 @@
           };
           psysonic-gdk-session = {
             type = "app";
-            program = lib.getExe pGdk;
+            program = lib.getExe p;
             meta = {
-              inherit (pGdk.meta) description homepage license;
+              inherit (p.meta) description homepage license;
+              mainProgram = "psysonic";
+            };
+          };
+          psysonic-x11-legacy = {
+            type = "app";
+            program = lib.getExe pX11;
+            meta = {
+              inherit (pX11.meta) description homepage license;
               mainProgram = "psysonic";
             };
           };

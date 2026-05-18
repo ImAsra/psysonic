@@ -2,75 +2,41 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(target_os = "linux")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum GpuVendor {
-    Nvidia,
-    Intel,
-    Amd,
-}
+use webkit2gtk_nvidia_quirk::{
+    apply_workaround_with_options, needs_workaround, set_webkit_disable_dmabuf_renderer,
+    ApplyWorkaroundOptions, WorkaroundKind,
+};
 
 #[cfg(target_os = "linux")]
-fn detect_gpu_vendor() -> Option<GpuVendor> {
-    use std::fs;
-
-    if fs::metadata("/proc/driver/nvidia/version").is_ok() {
-        return Some(GpuVendor::Nvidia);
+fn apply_linux_webkit_nvidia_quirk() {
+    if std::env::var("PSYSONIC_WEBKIT_GPU_ACCEL").is_ok() {
+        return;
     }
 
-    // Iterate every `/sys/class/drm/card*` — hybrid laptops expose multiple
-    // cards, and some systems have no `card0` at all.
-    let entries = fs::read_dir("/sys/class/drm").ok()?;
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        if !name.starts_with("card") || name.contains('-') {
-            continue;
+    // dev.sh gpu-x11 / nix psysonic-x11-legacy: WebKit uses the X11 GDK path while the session
+    // may still be `XDG_SESSION_TYPE=wayland`. The quirk maps that to `__NV_DISABLE_EXPLICIT_SYNC`,
+    // which mismatches a real X11 EGL stack and can leave the webview gray — mirror the native-X11
+    // branch (`WEBKIT_DISABLE_DMABUF_RENDERER` only) whenever GDK is pinned to x11 first in the list.
+    let forced_x11_gdk = std::env::var("GDK_BACKEND").ok().is_some_and(|s| {
+        matches!(s.split(',').next().map(str::trim), Some("x11"))
+    });
+    if forced_x11_gdk {
+        match needs_workaround() {
+            WorkaroundKind::None => {}
+            WorkaroundKind::DisableWebkitDmabufRenderer | WorkaroundKind::DisableNvExplicitSync => {
+                set_webkit_disable_dmabuf_renderer();
+            }
         }
-        let Ok(vendor_id) = fs::read_to_string(entry.path().join("device/vendor")) else {
-            continue;
-        };
-        match vendor_id.trim() {
-            "0x10de" => return Some(GpuVendor::Nvidia),
-            "0x8086" => return Some(GpuVendor::Intel),
-            "0x1002" => return Some(GpuVendor::Amd),
-            _ => {}
-        }
+    } else {
+        apply_workaround_with_options(ApplyWorkaroundOptions::default());
     }
-
-    None
 }
 
 fn main() {
-    // WebKitGTK on Wayland can be unstable — default to X11 when GDK_BACKEND is unset,
-    // except when PSYSONIC_ALLOW_NATIVE_GDK is set (e.g. Nix psysonic-gdk-session wrapper).
-    // Users can still override by setting GDK_BACKEND before launch.
-    //
-    // Safety: set_var modifies global process state. These calls are safe here
-    // because we're in main() before the Tauri runtime starts — no other threads
-    // exist yet. If this code moves to lazy init or a plugin context, it would
-    // need synchronization or marking as unsafe (Rust 2024+).
+    // Linux GTK/WebKit: `webkit2gtk-nvidia-quirk` (skipped when `PSYSONIC_WEBKIT_GPU_ACCEL` is set).
+    // Forced `GDK_BACKEND=x11` uses the X11-only mitigation path — see `apply_linux_webkit_nvidia_quirk`.
     #[cfg(target_os = "linux")]
-    {
-        // Nix `psysonic-gdk-session` sets this so we do not pin X11 when the packager asked for
-        // session-native GDK (e.g. Wayland). Local dev can export the same var before `tauri dev`.
-        let allow_native_gdk = std::env::var("PSYSONIC_ALLOW_NATIVE_GDK").is_ok();
-        if std::env::var("GDK_BACKEND").is_err() && !allow_native_gdk {
-            std::env::set_var("GDK_BACKEND", "x11");
-        }
-        if std::env::var("WEBKIT_DISABLE_COMPOSITING_MODE").is_err() {
-            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
-        }
-
-        // NVIDIA proprietary adds a small but reproducible overhead on the
-        // DMA-BUF renderer path (blind A/B confirmed on NVIDIA + proprietary).
-        // Unknown GPUs keep the WebKitGTK default — VMs, ARM SBCs and anything
-        // exotic should not be regressed by a guess.
-        if std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err()
-            && matches!(detect_gpu_vendor(), Some(GpuVendor::Nvidia))
-        {
-            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        }
-    }
+    apply_linux_webkit_nvidia_quirk();
 
     let args: Vec<String> = std::env::args().collect();
     if psysonic_lib::cli::wants_version(&args) {

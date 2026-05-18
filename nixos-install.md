@@ -85,25 +85,27 @@ environment.systemPackages = with pkgs; [
 ];
 ```
 
-### Linux wrapper: default vs gdk-session
+### Linux wrapper (default vs legacy X11)
 
-The flake exposes **two** installable packages on Linux. They are the same build; only the **wrapped runtime environment** differs:
+The flake exposes **three** Linux attributes (two are the **same derivation**):
 
 | Flake attribute | Wrapper behaviour |
 |----------------|-------------------|
-| **`psysonic`** (and **`default`**) | Sets **`GDK_BACKEND=x11`** together with the usual WebKit / GStreamer / AppIndicator paths. This is the **recommended default**: it matches the dev shell assumptions and avoids many WebKitGTK + Wayland edge cases. |
-| **`psysonic-gdk-session`** | **Does not** set `GDK_BACKEND`; GTK follows the session (e.g. native Wayland when available). Can improve **HiDPI sizing** on some desktops, but may cause **black window, broken scrolling, or tray quirks** on other GPU/compositor stacks—the same class of issues described under Linux / WebKit in the in-app Help. **Not default** on purpose. |
+| **`psysonic`**, **`default`**, **`psysonic-gdk-session`** | Wrappers prefix **libraries only** (**GStreamer**, **AppIndicator**); **`GDK_BACKEND`** is **not** pinned. The binary invokes **`webkit2gtk-nvidia-quirk`** early on Linux (unless **`PSYSONIC_WEBKIT_GPU_ACCEL`** is set); no extra **`WEBKIT_DISABLE_*`** heuristics in **`main.rs`**. Override with **`GDK_BACKEND`**, **`WEBKIT_DISABLE_*`**, etc. whenever you want. |
+| **`psysonic-x11-legacy`** | Former default: **`GDK_BACKEND=x11`** pinned in the wrapper. Use if you relied on **XWayland-ish** stability on messy stacks. Same binary as **`psysonic`**. |
 
-Use the alternate package when you understand that trade-off:
+`psysonic-gdk-session` remains a **back-compat alias** for **`psysonic`** (identical store path).
+
+### Example: legacy X11 wrap
 
 ```nix
-inputs.psysonic.packages.${system}.psysonic-gdk-session
+inputs.psysonic.packages.${system}.psysonic-x11-legacy
 ```
 
 Or one-shot (quote the URL in **zsh** — `?` / `#` are special):
 
 ```bash
-nix run 'github:Psychotoxical/psysonic#psysonic-gdk-session' -- --help
+nix run 'github:Psychotoxical/psysonic#psysonic-x11-legacy' -- --help
 ```
 
 ### Pinning a revision, branch, or tag
@@ -142,7 +144,7 @@ From any machine with flakes:
 nix run 'github:Psychotoxical/psysonic'
 ```
 
-Same as `nix build` / `packages.<system>.default` (the **x11-wrapped** binary); uses the flake `apps` output. For the session-GDK variant, use `'github:Psychotoxical/psysonic#psysonic-gdk-session'` (see [Linux wrapper](#linux-wrapper-default-vs-gdk-session) above). With a branch pin, keep the **whole** `github:…?ref=…#…` string in **single quotes** under **zsh**.
+Same as `nix build` / `packages.<system>.default` (session-native **GDK**); uses the flake `apps` output. For an **X11-pinned** launcher (old default), use `'github:Psychotoxical/psysonic#psysonic-x11-legacy'` (see [Linux wrapper](#linux-wrapper-default-vs-legacy-x11) above). `psysonic-gdk-session` is an **alias**—same as **`psysonic`**. With a branch pin, keep the **whole** `github:…?ref=…#…` string in **single quotes** under **zsh**.
 
 ### Apply configuration
 
@@ -178,8 +180,6 @@ From a **flake-enabled** clone of the repo:
 - **`nix shell .#devShells.default`** — same packages and hooks without `nix develop`’s subshell semantics.
 
 The flake **`devShell`** uses the same **`nixpkgs`** input as **`packages.psysonic`** (see **`flake.nix`**).
-
-Optional **local-only** helpers (`dev.sh`, `shell.nix`, `prod.sh`) are **gitignored** — not part of the upstream tree; keep your own copies if you use them (e.g. a small `dev.sh` that runs `nix develop` and `npm run tauri:dev`).
 
 ## Desktop entry
 

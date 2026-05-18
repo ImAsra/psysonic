@@ -4,12 +4,13 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LayoutGrid, List, Images, CheckSquare2 } from 'lucide-react';
 import StarFilterButton from '../components/StarFilterButton';
+import OverlayScrollArea from '../components/OverlayScrollArea';
 import { usePlayerStore } from '../store/playerStore';
 import { useAuthStore } from '../store/authStore';
 import { useTranslation } from 'react-i18next';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { APP_MAIN_SCROLL_VIEWPORT_ID } from '../constants/appScroll';
-import { useElementClientHeightById } from '../hooks/useResizeClientHeight';
+import { APP_MAIN_SCROLL_VIEWPORT_ID, ARTISTS_INPAGE_SCROLL_VIEWPORT_ID } from '../constants/appScroll';
+import { useElementClientHeightById, useElementClientHeightForElement } from '../hooks/useResizeClientHeight';
 import { useCardGridMetrics } from '../hooks/useCardGridMetrics';
 import { useRemeasureGridVirtualizer } from '../hooks/useRemeasureGridVirtualizer';
 import { useVirtualizerScrollMargin } from '../hooks/useVirtualizerScrollMargin';
@@ -22,6 +23,7 @@ import {
   ARTIST_LIST_ROW_EST,
 } from '../utils/componentHelpers/artistsHelpers';
 import { useArtistsFiltering } from '../hooks/useArtistsFiltering';
+import { useMainstageInpageHeaderTight } from '../hooks/useMainstageInpageHeaderTight';
 import { useArtistsInfiniteScroll } from '../hooks/useArtistsInfiniteScroll';
 import { ArtistsGridView } from '../components/artists/ArtistsGridView';
 import { ArtistsListView } from '../components/artists/ArtistsListView';
@@ -36,6 +38,14 @@ export default function Artists() {
   const [starredOnly, setStarredOnly] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
+  const artistsScrollBodyRef = useRef<HTMLDivElement | null>(null);
+  const [artistsScrollBodyEl, setArtistsScrollBodyEl] = useState<HTMLDivElement | null>(null);
+  const bindArtistsScrollBody = useCallback((el: HTMLDivElement | null) => {
+    artistsScrollBodyRef.current = el;
+    setArtistsScrollBodyEl(el);
+  }, []);
+  const getArtistsScrollRoot = useCallback(() => artistsScrollBodyRef.current, []);
+
   const showArtistImages = useAuthStore(s => s.showArtistImages);
   const PAGE_SIZE = showArtistImages ? 50 : 100; // Smaller with images to reduce I/O
   const {
@@ -45,6 +55,7 @@ export default function Artists() {
   } = useArtistsInfiniteScroll({
     pageSize: PAGE_SIZE,
     resetDeps: [filter, letterFilter, starredOnly, viewMode],
+    getScrollRoot: getArtistsScrollRoot,
   });
   const navigate = useNavigate();
   const openContextMenu = usePlayerStore(state => state.openContextMenu);
@@ -68,11 +79,6 @@ export default function Artists() {
     });
   }, []);
 
-  const clearSelection = () => {
-    setSelectionMode(false);
-    setSelectedIds(new Set());
-  };
-
   const selectedArtists = artists.filter(a => selectedIds.has(a.id));
 
   useEffect(() => {
@@ -83,7 +89,25 @@ export default function Artists() {
     filtered, visible, hasMore, groups, letters, artistListFlatRows,
   } = useArtistsFiltering({ artists, filter, letterFilter, starredOnly, visibleCount, viewMode });
 
+  const mainstageHeaderTight = useMainstageInpageHeaderTight(artistsScrollBodyEl, [
+    filter,
+    letterFilter,
+    starredOnly,
+    viewMode,
+  ]);
+
   const mainScrollViewportHeight = useElementClientHeightById(APP_MAIN_SCROLL_VIEWPORT_ID);
+  const artistsInpageScrollHeight = useElementClientHeightForElement(
+    artistsScrollBodyEl,
+    mainScrollViewportHeight,
+  );
+
+  const getInpageScrollElement = useCallback(
+    () =>
+      artistsScrollBodyRef.current
+      ?? (document.getElementById(APP_MAIN_SCROLL_VIEWPORT_ID) as HTMLElement | null),
+    [],
+  );
 
   const artistGridMeasureRef = useRef<HTMLDivElement>(null);
   const { gridCols: artistGridCols, rowHeightEst: artistGridRowHeightEst } = useCardGridMetrics(
@@ -97,7 +121,7 @@ export default function Artists() {
 
   const artistGridOverscan = Math.max(
     2,
-    Math.ceil(mainScrollViewportHeight / Math.max(1, artistGridRowHeightEst)),
+    Math.ceil(artistsInpageScrollHeight / Math.max(1, artistGridRowHeightEst)),
   );
 
   const artistGridScrollMargin = useVirtualizerScrollMargin(
@@ -114,7 +138,7 @@ export default function Artists() {
       perfFlags.disableMainstageVirtualLists || viewMode !== 'grid'
         ? 0
         : artistVirtualRowCount,
-    getScrollElement: () => document.getElementById(APP_MAIN_SCROLL_VIEWPORT_ID),
+    getScrollElement: getInpageScrollElement,
     estimateSize: () => artistGridRowHeightEst,
     overscan: artistGridOverscan,
     scrollMargin: artistGridScrollMargin,
@@ -127,10 +151,9 @@ export default function Artists() {
     virtualRowCount: artistVirtualRowCount,
   });
 
-  /** Mixed row heights; smallest typical step ≈ artist row — one viewport of extra indices each side. */
   const artistListOverscan = Math.max(
     12,
-    Math.ceil(mainScrollViewportHeight / ARTIST_LIST_ROW_EST),
+    Math.ceil(artistsInpageScrollHeight / ARTIST_LIST_ROW_EST),
   );
 
   const artistListWrapRef = useRef<HTMLDivElement>(null);
@@ -146,14 +169,13 @@ export default function Artists() {
   const artistListVirtualizer = useVirtualizer({
     count:
       perfFlags.disableMainstageVirtualLists || viewMode !== 'list' ? 0 : artistListFlatRows.length,
-    getScrollElement: () => document.getElementById(APP_MAIN_SCROLL_VIEWPORT_ID),
+    getScrollElement: getInpageScrollElement,
     estimateSize: index => {
       const row = artistListFlatRows[index];
       if (!row) return ARTIST_LIST_ROW_EST;
       if (row.kind === 'letter') return ARTIST_LIST_LETTER_ROW_EST;
       return row.isLastInLetter ? ARTIST_LIST_LAST_IN_LETTER_EST : ARTIST_LIST_ROW_EST;
     },
-    /** Stable keys — avoids row DOM reuse glitches when the filtered slice changes. */
     getItemKey: index => {
       const row = artistListFlatRows[index];
       if (!row) return index;
@@ -165,135 +187,156 @@ export default function Artists() {
   });
 
   return (
-    <div className="content-body animate-fade-in">
-      <div className="page-sticky-header">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <h1 className="page-title" style={{ marginBottom: 0 }}>
-              {selectionMode && selectedIds.size > 0
-                ? t('artists.selectionCount', { count: selectedIds.size })
-                : t('artists.title')}
-            </h1>
-            <input
-              className="input"
-              style={{ maxWidth: 220 }}
-              placeholder={t('artists.search')}
-              value={filter}
-              onChange={e => setFilter(e.target.value)}
-              id="artist-filter-input"
-            />
+    <div
+      className={`content-body animate-fade-in mainstage-inpage-split${mainstageHeaderTight ? ' mainstage-inpage--header-tight' : ''}`}
+    >
+      <div className="mainstage-inpage-toolbar">
+        <div className="page-sticky-header">
+          <div className="mainstage-inpage-toolbar-row">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <h1 className="page-title" style={{ marginBottom: 0 }}>
+                {selectionMode && selectedIds.size > 0
+                  ? t('artists.selectionCount', { count: selectedIds.size })
+                  : t('artists.title')}
+              </h1>
+              <input
+                className="input"
+                style={{ maxWidth: 220 }}
+                placeholder={t('artists.search')}
+                value={filter}
+                onChange={e => setFilter(e.target.value)}
+                id="artist-filter-input"
+              />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              {!(selectionMode && selectedIds.size > 0) && (<>
+                  <StarFilterButton size="compact" active={starredOnly} onChange={setStarredOnly} />
+                  <button
+                    className={`btn btn-surface`}
+                    onClick={() => setShowArtistImages(!showArtistImages)}
+                    style={showArtistImages ? { background: 'var(--accent)', color: 'var(--ctp-crust)', padding: '0.5rem' } : { padding: '0.5rem' }}
+                    data-tooltip={showArtistImages ? t('artists.imagesOn') : t('artists.imagesOff')}
+                    data-tooltip-wrap
+                  >
+                    <Images size={20} />
+                  </button>
+                  <button
+                    className={`btn btn-surface ${viewMode === 'grid' ? 'btn-sort-active' : ''}`}
+                    onClick={() => setViewMode('grid')}
+                    style={viewMode === 'grid' ? { background: 'var(--accent)', color: 'var(--ctp-crust)', padding: '0.5rem' } : { padding: '0.5rem' }}
+                    data-tooltip={t('artists.gridView')}
+                  >
+                    <LayoutGrid size={20} />
+                  </button>
+                  <button
+                    className={`btn btn-surface ${viewMode === 'list' ? 'btn-sort-active' : ''}`}
+                    onClick={() => setViewMode('list')}
+                    style={viewMode === 'list' ? { background: 'var(--accent)', color: 'var(--ctp-crust)', padding: '0.5rem' } : { padding: '0.5rem' }}
+                    data-tooltip={t('artists.listView')}
+                  >
+                    <List size={20} />
+                  </button>
+                </>
+              )}
+              <button
+                className={`btn btn-surface${selectionMode ? ' btn-sort-active' : ''}`}
+                onClick={toggleSelectionMode}
+                data-tooltip={selectionMode ? t('artists.cancelSelect') : t('artists.startSelect')}
+                data-tooltip-pos="bottom"
+                style={selectionMode ? { background: 'var(--accent)', color: 'var(--ctp-crust)' } : {}}
+              >
+                <CheckSquare2 size={15} />
+                {selectionMode ? t('artists.cancelSelect') : t('artists.select')}
+              </button>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            {!(selectionMode && selectedIds.size > 0) && (<>
-                <StarFilterButton size="compact" active={starredOnly} onChange={setStarredOnly} />
-                <button
-                  className={`btn btn-surface`}
-                  onClick={() => setShowArtistImages(!showArtistImages)}
-                  style={showArtistImages ? { background: 'var(--accent)', color: 'var(--ctp-crust)', padding: '0.5rem' } : { padding: '0.5rem' }}
-                  data-tooltip={showArtistImages ? t('artists.imagesOn') : t('artists.imagesOff')}
-                  data-tooltip-wrap
-                >
-                  <Images size={20} />
-                </button>
-                <button
-                  className={`btn btn-surface ${viewMode === 'grid' ? 'btn-sort-active' : ''}`}
-                  onClick={() => setViewMode('grid')}
-                  style={viewMode === 'grid' ? { background: 'var(--accent)', color: 'var(--ctp-crust)', padding: '0.5rem' } : { padding: '0.5rem' }}
-                  data-tooltip={t('artists.gridView')}
-                >
-                  <LayoutGrid size={20} />
-                </button>
-                <button
-                  className={`btn btn-surface ${viewMode === 'list' ? 'btn-sort-active' : ''}`}
-                  onClick={() => setViewMode('list')}
-                  style={viewMode === 'list' ? { background: 'var(--accent)', color: 'var(--ctp-crust)', padding: '0.5rem' } : { padding: '0.5rem' }}
-                  data-tooltip={t('artists.listView')}
-                >
-                  <List size={20} />
-                </button>
-              </>
-            )}
-            <button
-              className={`btn btn-surface${selectionMode ? ' btn-sort-active' : ''}`}
-              onClick={toggleSelectionMode}
-              data-tooltip={selectionMode ? t('artists.cancelSelect') : t('artists.startSelect')}
-              data-tooltip-pos="bottom"
-              style={selectionMode ? { background: 'var(--accent)', color: 'var(--ctp-crust)' } : {}}
-            >
-              <CheckSquare2 size={15} />
-              {selectionMode ? t('artists.cancelSelect') : t('artists.select')}
-            </button>
+          <div className="mainstage-inpage-toolbar-alpha-row">
+            {ALPHABET.map(l => (
+              <button
+                key={l}
+                onClick={() => setLetterFilter(l)}
+                className={`artists-alpha-btn${letterFilter === l ? ' artists-alpha-btn--active' : ''}`}
+              >
+                {l === ALL_SENTINEL ? t('artists.all') : l}
+              </button>
+            ))}
           </div>
-        </div>
-
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: 'var(--space-4)' }}>
-          {ALPHABET.map(l => (
-            <button
-              key={l}
-              onClick={() => setLetterFilter(l)}
-              className={`artists-alpha-btn${letterFilter === l ? ' artists-alpha-btn--active' : ''}`}
-            >
-              {l === ALL_SENTINEL ? t('artists.all') : l}
-            </button>
-          ))}
         </div>
       </div>
 
-      {loading && <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}><div className="spinner" /></div>}
+      <OverlayScrollArea
+        className="mainstage-inpage-scroll"
+        viewportClassName="mainstage-inpage-scroll__viewport"
+        viewportId={ARTISTS_INPAGE_SCROLL_VIEWPORT_ID}
+        viewportRef={bindArtistsScrollBody}
+        railInset="panel"
+        measureDeps={[
+          loading,
+          viewMode,
+          visible.length,
+          artistListFlatRows.length,
+          filtered.length,
+          hasMore,
+          selectionMode,
+        ]}
+      >
+        {loading && <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}><div className="spinner" /></div>}
 
-      {!loading && viewMode === 'grid' && (
-        <ArtistsGridView
-          visible={visible}
-          gridCols={artistGridCols}
-          measureRef={artistGridMeasureRef}
-          virtualization={
-            perfFlags.disableMainstageVirtualLists
-              ? null
-              : { virtualizer: artistGridVirtualizer, scrollMargin: artistGridScrollMargin }
-          }
-          selectionMode={selectionMode}
-          selectedIds={selectedIds}
-          selectedArtists={selectedArtists}
-          showArtistImages={showArtistImages}
-          toggleSelect={toggleSelect}
-          navigate={navigate}
-          openContextMenu={openContextMenu}
-          t={t}
-        />
-      )}
+        {!loading && viewMode === 'grid' && (
+          <ArtistsGridView
+            visible={visible}
+            gridCols={artistGridCols}
+            measureRef={artistGridMeasureRef}
+            virtualization={
+              perfFlags.disableMainstageVirtualLists
+                ? null
+                : { virtualizer: artistGridVirtualizer, scrollMargin: artistGridScrollMargin }
+            }
+            selectionMode={selectionMode}
+            selectedIds={selectedIds}
+            selectedArtists={selectedArtists}
+            showArtistImages={showArtistImages}
+            toggleSelect={toggleSelect}
+            navigate={navigate}
+            openContextMenu={openContextMenu}
+            t={t}
+          />
+        )}
 
-      {!loading && viewMode === 'list' && (
-        <ArtistsListView
-          virtualized={!perfFlags.disableMainstageVirtualLists}
-          groups={groups}
-          letters={letters}
-          artistListFlatRows={artistListFlatRows}
-          artistListVirtualizer={artistListVirtualizer}
-          artistListWrapRef={artistListWrapRef}
-          artistListScrollMargin={artistListScrollMargin}
-          selectionMode={selectionMode}
-          selectedIds={selectedIds}
-          selectedArtists={selectedArtists}
-          showArtistImages={showArtistImages}
-          toggleSelect={toggleSelect}
-          navigate={navigate}
-          openContextMenu={openContextMenu}
-          t={t}
-        />
-      )}
+        {!loading && viewMode === 'list' && (
+          <ArtistsListView
+            virtualized={!perfFlags.disableMainstageVirtualLists}
+            groups={groups}
+            letters={letters}
+            artistListFlatRows={artistListFlatRows}
+            artistListVirtualizer={artistListVirtualizer}
+            artistListWrapRef={artistListWrapRef}
+            artistListScrollMargin={artistListScrollMargin}
+            selectionMode={selectionMode}
+            selectedIds={selectedIds}
+            selectedArtists={selectedArtists}
+            showArtistImages={showArtistImages}
+            toggleSelect={toggleSelect}
+            navigate={navigate}
+            openContextMenu={openContextMenu}
+            t={t}
+          />
+        )}
 
-      {!loading && hasMore && (
-        <div ref={observerTarget} style={{ height: '20px', margin: '2rem 0', display: 'flex', justifyContent: 'center' }}>
-          {loadingMore && <div className="spinner" style={{ width: 20, height: 20 }} />}
-        </div>
-      )}
+        {!loading && hasMore && (
+          <div ref={observerTarget} style={{ height: '20px', margin: '2rem 0', display: 'flex', justifyContent: 'center' }}>
+            {loadingMore && <div className="spinner" style={{ width: 20, height: 20 }} />}
+          </div>
+        )}
 
-      {!loading && filtered.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-          {t('artists.notFound')}
-        </div>
-      )}
+        {!loading && filtered.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+            {t('artists.notFound')}
+          </div>
+        )}
+      </OverlayScrollArea>
     </div>
   );
 }

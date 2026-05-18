@@ -137,8 +137,12 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             {
                 use tauri::Manager;
+                let handle = app.handle().clone();
+                sync_wayland_text_profile_cache_from_disk(&handle);
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.set_decorations(false);
+                    let _ = linux_webkit_apply_wayland_gpu_font_tuning(&win);
+                    let _ = linux_webkit_reapply_cached_wayland_text_render_profile(&win);
                 }
             }
 
@@ -338,12 +342,16 @@ pub fn run() {
             cli_publish_search_results,
             set_window_decorations,
             set_linux_webkit_smooth_scrolling,
+            linux_wayland_gpu_font_tuning_active,
+            linux_wayland_text_render_settings_available,
+            set_linux_wayland_text_render_profile,
             set_logging_mode,
             export_runtime_logs,
             frontend_debug_log,
             performance_cpu_snapshot,
             set_subsonic_wire_user_agent,
             no_compositing_mode,
+            linux_xdg_session_type,
             is_tiling_wm_cmd,
             open_mini_player,
             preload_mini_player,

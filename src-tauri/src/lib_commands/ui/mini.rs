@@ -249,6 +249,12 @@ pub(crate) fn build_mini_player_window(
         .build()
         .map_err(|e| format!("failed to build mini player window: {e}"))?;
 
+    #[cfg(target_os = "linux")]
+    {
+        let _ = crate::lib_commands::linux_webkit_apply_wayland_gpu_font_tuning(&win);
+        let _ = crate::lib_commands::linux_webkit_reapply_cached_wayland_text_render_profile(&win);
+    }
+
     // Inject pause script immediately when the window is created hidden.
     // On Windows WebView2 keeps the GPU context alive even with
     // `SetIsVisible(false)` — this JS stops all rendering work.

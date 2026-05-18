@@ -101,5 +101,5 @@ export const help = {
   q44: 'Las portadas e imágenes de artista cargan lentamente.',
   a44: 'Las imágenes se obtienen del servidor en la primera vista y luego se almacenan localmente durante 30 días. Si el almacenamiento de tu servidor es lento, la primera visita a una página puede tardar un momento; las visitas posteriores son instantáneas. Hot Cache también ayuda con pistas pero el caché de imágenes es independiente.',
   q45: 'Problemas en Linux — ¿pantalla negra o sin sonido?',
-  a45: 'La pantalla negra es generalmente un problema de driver GPU / EGL en WebKitGTK — lanza con GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 (los instaladores AUR / .deb / .rpm los configuran automáticamente). Para audio, asegúrate de que PipeWire o PulseAudio esté ejecutándose. Los cortes de audio tras suspensión / despertar ahora son manejados automáticamente por el hook de recuperación post-sleep.',
+  a45: 'La pantalla negra en Linux suele ser un problema de gráficos o de la ventana WebView. Prueba una sesión X11 o, antes de abrir la app, exporta GDK_BACKEND=x11 y EGL_PLATFORM=x11 si usas Wayland. Audio: PipeWire o PulseAudio. Si pierdes el sonido tras suspender, cierra por completo Psysonic y vuelve a abrirlo.',
 };

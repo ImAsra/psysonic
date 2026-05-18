@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuthStore } from '../store/authStore';
+import type { LinuxWaylandTextRenderProfile } from '../store/authStoreTypes';
 import { IS_LINUX, IS_MACOS, IS_WINDOWS } from '../utils/platform';
 
 /**
@@ -12,8 +13,10 @@ import { IS_LINUX, IS_MACOS, IS_WINDOWS } from '../utils/platform';
  */
 export function usePlatformShellSetup(): { isTilingWm: boolean } {
   const [isTilingWm, setIsTilingWm] = useState(false);
+  const [waylandTextUi, setWaylandTextUi] = useState(false);
   const useCustomTitlebar = useAuthStore(s => s.useCustomTitlebar);
   const linuxWebkitKineticScroll = useAuthStore(s => s.linuxWebkitKineticScroll);
+  const linuxWaylandTextRenderProfile = useAuthStore(s => s.linuxWaylandTextRenderProfile);
   const loggingMode = useAuthStore(s => s.loggingMode);
 
   useEffect(() => {
@@ -29,9 +32,52 @@ export function usePlatformShellSetup(): { isTilingWm: boolean } {
   }, []);
 
   useEffect(() => {
+    if (!IS_LINUX) return;
+    invoke<boolean>('linux_wayland_text_render_settings_available')
+      .then(av => {
+        setWaylandTextUi(av);
+        if (av) {
+          document.documentElement.setAttribute('data-linux-session', 'wayland');
+        } else {
+          document.documentElement.removeAttribute('data-linux-session');
+          document.documentElement.removeAttribute('data-wayland-text-profile');
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     const platform = IS_LINUX ? 'linux' : IS_MACOS ? 'macos' : IS_WINDOWS ? 'windows' : 'unknown';
     document.documentElement.setAttribute('data-platform', platform);
   }, []);
+
+  // Wayland text profile: CSS on <html> updates live; Rust persists for next launch / new mini webview
+  // (WebKitGTK can hang when hardware-acceleration-policy is toggled repeatedly at runtime).
+  useEffect(() => {
+    if (!IS_LINUX || !waylandTextUi) {
+      document.documentElement.removeAttribute('data-wayland-text-profile');
+      return;
+    }
+
+    let cancelHydration: (() => void) | undefined;
+
+    const apply = (profile: LinuxWaylandTextRenderProfile) => {
+      document.documentElement.setAttribute('data-wayland-text-profile', profile);
+      invoke('set_linux_wayland_text_render_profile', { profile }).catch(() => {});
+    };
+
+    apply(linuxWaylandTextRenderProfile);
+
+    if (!useAuthStore.persist.hasHydrated()) {
+      cancelHydration = useAuthStore.persist.onFinishHydration(() => {
+        apply(useAuthStore.getState().linuxWaylandTextRenderProfile);
+      });
+    }
+
+    return () => {
+      cancelHydration?.();
+    };
+  }, [IS_LINUX, waylandTextUi, linuxWaylandTextRenderProfile]);
 
   // Sync custom titlebar preference with native decorations on Linux.
   // On tiling WMs decorations are always off (no native title bar to replace).
@@ -45,6 +91,23 @@ export function usePlatformShellSetup(): { isTilingWm: boolean } {
     if (!IS_LINUX) return;
     invoke('set_linux_webkit_smooth_scrolling', { enabled: linuxWebkitKineticScroll }).catch(() => {});
   }, [linuxWebkitKineticScroll]);
+
+  // Persist rehydrates after first paint — default store has kinetic scroll ON until localStorage merges.
+  // Re-apply OS WebKit prefs after hydrate (same pattern as useMiniWindowSetup) so OFF stays OFF.
+  useEffect(() => {
+    if (!IS_LINUX) return;
+    const applySmoothFromStore = () => {
+      invoke('set_linux_webkit_smooth_scrolling', {
+        enabled: useAuthStore.getState().linuxWebkitKineticScroll,
+      }).catch(() => {});
+    };
+    if (useAuthStore.persist.hasHydrated()) {
+      applySmoothFromStore();
+    }
+    return useAuthStore.persist.onFinishHydration(() => {
+      applySmoothFromStore();
+    });
+  }, []);
 
   useEffect(() => {
     invoke('set_logging_mode', { mode: loggingMode }).catch(() => {});

@@ -2,7 +2,7 @@ mod cli_bridge;
 mod core;
 mod integration;
 mod perf;
-mod platform;
+pub(crate) mod platform;
 
 // Tauri commands re-exported for the lib.rs invoke_handler.
 pub(crate) use cli_bridge::{
@@ -14,7 +14,15 @@ pub(crate) use core::{
     set_subsonic_wire_user_agent,
 };
 pub(crate) use perf::performance_cpu_snapshot;
-pub(crate) use platform::{set_linux_webkit_smooth_scrolling, set_window_decorations};
+pub(crate) use platform::{
+    linux_wayland_gpu_font_tuning_active, linux_wayland_text_render_settings_available,
+    set_linux_wayland_text_render_profile, set_linux_webkit_smooth_scrolling, set_window_decorations,
+};
+#[cfg(target_os = "linux")]
+pub(crate) use platform::{
+    linux_webkit_apply_wayland_gpu_font_tuning, linux_webkit_reapply_cached_wayland_text_render_profile,
+    sync_wayland_text_profile_cache_from_disk,
+};
 pub(crate) use integration::{
     check_dir_accessible, mpris_set_metadata, mpris_set_playback, register_global_shortcut,
     unregister_global_shortcut,

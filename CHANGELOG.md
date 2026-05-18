@@ -42,6 +42,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+### Linux — session GDK, WebKitGTK mitigations, and Wayland text
+
+**By [@cucadmuh](https://github.com/cucadmuh), PR [#731](https://github.com/Psychotoxical/psysonic/pull/731)**
+
+* **Nix / AUR** default installs follow the session GDK backend instead of pinning `GDK_BACKEND=x11`; startup applies **`webkit2gtk-nvidia-quirk`** only (skip with **`PSYSONIC_WEBKIT_GPU_ACCEL`**). **`nix run .#psysonic-x11-legacy`** keeps the old explicit X11 launcher.
+* **NVIDIA + forced X11** on a Wayland user session no longer greys out the webview — the quirk uses the DMABUF renderer path instead of Wayland explicit-sync disable.
+* **Wayland + GPU compositing:** clearer UI text via on-demand hardware acceleration on main and mini webviews; **Settings → System** adds **Wayland text rendering** presets (Balanced / Sharp / GPU / Minimal). Opt out with **`PSYSONIC_SKIP_WAYLAND_FONT_TUNING`**.
+
+
+
+### Library browse — in-page overlay scroll
+
+**By [@cucadmuh](https://github.com/cucadmuh), PR [#731](https://github.com/Psychotoxical/psysonic/pull/731)**
+
+* **Artists**, **Albums**, **Composers**, **Lossless albums**, and **New releases** scroll inside the route on a locked in-page viewport — toolbars stay sticky, virtual grids use the matching scroll root.
+* Sidebar hover and album/artist card covers no longer jitter on WebKitGTK + Wayland during pointer moves.
+
+
+
 ## [1.46.0] - 2026-05-18
 
 > **🙏 Special thanks to [@zz5zz](https://github.com/zz5zz)** for his tireless quirk-spotting and bug reports on the [Psysonic Discord](https://discord.gg/AMnDRErm4u) — several of the polish fixes in this release landed directly off the back of his messages.
@@ -435,7 +454,6 @@ Foundational work: faster reviews, narrower diffs, and a safety net under the pa
 **By [@cucadmuh](https://github.com/cucadmuh) + [@Psychotoxical](https://github.com/Psychotoxical)**
 
 * Frontend counterpart to the backend split: largest page components, stores, and stylesheets broken into focused files; duplicated helpers consolidated; i18n and CSS split per namespace. **No user-visible behaviour change** — moves verified by TypeScript, Vitest, and production builds, with characterization tests added along the way.
-
 
 
 ## Removed

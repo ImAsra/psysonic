@@ -22,7 +22,10 @@ import OrbitAccountPicker from '../components/OrbitAccountPicker';
 import OrbitHelpModal from '../components/OrbitHelpModal';
 import TooltipPortal from '../components/TooltipPortal';
 import OverlayScrollArea from '../components/OverlayScrollArea';
-import { APP_MAIN_SCROLL_VIEWPORT_ID } from '../constants/appScroll';
+import {
+  APP_MAIN_SCROLL_VIEWPORT_ID,
+  MAIN_ROUTE_INPAGE_SCROLL_VIEWPORT_ID_BY_PATH,
+} from '../constants/appScroll';
 import ConnectionIndicator from '../components/ConnectionIndicator';
 import LastfmIndicator from '../components/LastfmIndicator';
 import OfflineBanner from '../components/OfflineBanner';
@@ -212,7 +215,11 @@ export function AppShell() {
         <div className="content-body app-shell-route-host">
           <OverlayScrollArea
             className="app-shell-route-scroll"
-            viewportClassName="app-shell-route-scroll__viewport"
+            viewportClassName={
+              MAIN_ROUTE_INPAGE_SCROLL_VIEWPORT_ID_BY_PATH[location.pathname]
+                ? 'app-shell-route-scroll__viewport app-shell-route-scroll__viewport--inpage-split'
+                : 'app-shell-route-scroll__viewport'
+            }
             viewportId={APP_MAIN_SCROLL_VIEWPORT_ID}
             measureDeps={[location.pathname, isQueueVisible, queueWidth, floatingPlayerBar]}
             railInset="panel"

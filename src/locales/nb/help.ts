@@ -101,5 +101,5 @@ export const help = {
   q44: 'Cover-art og artistbilder lastes sakte.',
   a44: 'Bilder hentes fra serveren ved første visning og caches deretter lokalt i 30 dager. Hvis serverens lagring er treg, kan første besøk på en side ta et øyeblikk; påfølgende besøk er umiddelbare. Hot Cache hjelper også for spor, men bildecachen er uavhengig.',
   q45: 'Linux-problemer — svart skjerm eller ingen lyd?',
-  a45: 'Svart skjerm er vanligvis et GPU- / EGL-driverproblem i WebKitGTK — start med GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 (AUR / .deb / .rpm-installerne setter disse automatisk). For lyd, sørg for at PipeWire eller PulseAudio kjører. Lydutfall etter dvale / oppvåkning håndteres nå automatisk av post-sleep recovery hook.',
+  a45: 'Svart skjerm på Linux tyder vanligvis på grafikk eller WebView-visning. Prøv X11-økt, eller sett GDK_BACKEND=x11 og EGL_PLATFORM=x11 før start ved Wayland. Lyd: PipeWire eller PulseAudio. Forsvinner lyd etter dvale: lukk Psysonic helt og åpne igjen.',
 };
