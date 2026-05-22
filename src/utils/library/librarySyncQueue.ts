@@ -62,6 +62,25 @@ function waitForServerIdle(serverId: string): Promise<void> {
   });
 }
 
+/** Wait until a server emits `library:sync-idle`, or time out (best-effort). */
+export function waitForLibrarySyncIdle(serverId: string, timeoutMs = 15_000): Promise<void> {
+  return new Promise(resolve => {
+    let unlisten: (() => void) | undefined;
+    const timer = setTimeout(() => {
+      unlisten?.();
+      resolve();
+    }, timeoutMs);
+    void subscribeLibrarySyncIdle(p => {
+      if (p.serverId !== serverId) return;
+      clearTimeout(timer);
+      unlisten?.();
+      resolve();
+    }).then(fn => {
+      unlisten = fn;
+    });
+  });
+}
+
 async function invokeSync(serverId: string, kind: LibrarySyncQueueKind): Promise<void> {
   if (kind === 'verify') {
     await librarySyncVerifyIntegrity({ serverId });
