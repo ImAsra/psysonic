@@ -128,6 +128,7 @@ const CONTRIBUTOR_ENTRIES = [
       'Playback speed: global 0.5–2.0× with Speed / Varispeed / Pitch shift strategies, player bar popover, Orbit passthrough (PR #852)',
       'Local library index: full resync orphan sweep (IS-7) — remove server-deleted tracks after successful re-sync (PR #861)',
       'Track enrichment: oximedia BPM/mood analysis, mood-group Advanced Search, queue display, unified playback analysis dispatch (PR #863)',
+      'Server index-key rebuild follow-up: startup-safe migration orchestration, per-server analysis strategy controls, playback/cache scope hardening, and backup/restore for library databases with blocking progress UX (PR #864)',
     ],
   },
   {
@@ -324,6 +325,7 @@ const CONTRIBUTOR_ENTRIES = [
       'Servers: inline edit for existing profiles (PR #780)',
       'Interface Scale: scales the entire window — sidebar, queue, player bar, modals and the fullscreen player follow the main content (PR #781)',
       'Local library index (preview): SQLite per-server track store, background initial and delta sync, live and Advanced Search against the local index, integrity verify and auto-reconcile on count drop (PR #846)',
+      'Server index-key rebuild: safe dual-DB migration flow, per-server analysis strategy controls, and playback/index scope hardening (PR #864)',
     ],
   },
 ] as const;

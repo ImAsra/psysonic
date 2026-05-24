@@ -12,7 +12,11 @@ import {
 } from './playListenSession';
 import { getPerfProbeFlags } from '../utils/perf/perfFlags';
 import { bumpPerfCounter } from '../utils/perf/perfTelemetry';
-import { getPlaybackServerId } from '../utils/playback/playbackServer';
+import {
+  getPlaybackCacheServerKey,
+  getPlaybackIndexKey,
+  getPlaybackServerId,
+} from '../utils/playback/playbackServer';
 import { resolvePlaybackUrl } from '../utils/playback/resolvePlaybackUrl';
 import { resolveReplayGainDb } from '../utils/audio/resolveReplayGainDb';
 import { showToast } from '../utils/ui/toast';
@@ -266,7 +270,8 @@ export function handleAudioProgress(
     const shouldBytePreloadForGaplessBackup =
       gaplessEnabled && remaining < gaplessBackupWindowSecs && remaining > 0;
 
-    const serverId = getPlaybackServerId();
+    const serverId = getPlaybackCacheServerKey();
+    const analysisServerId = getPlaybackIndexKey();
     const nextUrl = resolvePlaybackUrl(nextTrack.id, serverId);
     const nextIsLocalFile = nextUrl.startsWith('psysonic-local://');
 
@@ -295,7 +300,7 @@ export function handleAudioProgress(
         url: nextUrl,
         durationHint: nextTrack.duration,
         analysisTrackId: nextTrack.id,
-        serverId: serverId || null,
+        serverId: analysisServerId || null,
       }).catch(() => {});
     }
 
@@ -328,7 +333,7 @@ export function handleAudioProgress(
         fallbackDb: authState.replayGainFallbackDb,
         hiResEnabled: authState.enableHiRes,
         analysisTrackId: nextTrack.id,
-        serverId: serverId || null,
+        serverId: analysisServerId || null,
       }).catch(() => {});
     }
   }
@@ -363,7 +368,7 @@ export function handleAudioEnded(): void {
     void (async () => {
       if (repeatMode === 'one' && currentTrack) {
         const authState = useAuthStore.getState();
-        const repeatPromoteSid = getPlaybackServerId();
+        const repeatPromoteSid = getPlaybackCacheServerKey();
         if (authState.hotCacheEnabled && repeatPromoteSid) {
           // Same-track repeat never hit `playTrack`'s prev→promote path; flush
           // Rust `stream_completed_cache` to disk so `resolvePlaybackUrl` uses local.
@@ -416,7 +421,7 @@ export function handleAudioTrackSwitched(_duration: number): void {
 
   void playListenSessionOnTrackSwitched(nextTrack);
 
-  const switchServerId = getPlaybackServerId();
+  const switchServerId = getPlaybackCacheServerKey();
   const switchResolvedUrl = resolvePlaybackUrl(nextTrack.id, switchServerId);
   const switchPlaybackSource = playbackSourceHintForResolvedUrl(nextTrack.id, switchServerId, switchResolvedUrl);
 
@@ -459,7 +464,7 @@ export function handleAudioTrackSwitched(_duration: number): void {
     });
   }
   syncQueueToServer(queue, nextTrack, 0);
-  touchHotCacheOnPlayback(nextTrack.id, getPlaybackServerId());
+  touchHotCacheOnPlayback(nextTrack.id, getPlaybackCacheServerKey());
 }
 
 export function handleAudioError(message: string): void {
