@@ -373,6 +373,14 @@ pub struct PlaySessionYearBoundsDto {
     pub max_year: Option<i32>,
 }
 
+/// Min/max `year` from indexed tracks for a server (Albums year filter UI).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogYearBoundsDto {
+    pub min_year: Option<i32>,
+    pub max_year: Option<i32>,
+}
+
 /// `library_purge_server` outcome.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -478,6 +486,11 @@ pub struct LibraryAdvancedSearchRequest {
     pub filters: Vec<LibraryFilterClause>,
     #[serde(default)]
     pub starred_only: Option<bool>,
+    /// When set, album browse is limited to these ids (e.g. server `getStarred2`
+    /// intersected with local lossless / genre filters). Not combined with
+    /// `starred_only` — use one or the other.
+    #[serde(default)]
+    pub restrict_album_ids: Option<Vec<String>>,
     #[serde(default)]
     pub sort: Vec<LibrarySortClause>,
     pub limit: u32,

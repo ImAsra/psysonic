@@ -206,6 +206,8 @@ export interface LibraryAdvancedSearchRequest {
   entityTypes: LibraryEntityType[];
   filters?: LibraryFilterClause[];
   starredOnly?: boolean | null;
+  /** Server favorites ids ∩ local filters (lossless, genre, year). */
+  restrictAlbumIds?: string[] | null;
   sort?: LibrarySortClause[];
   limit: number;
   offset?: number;
@@ -599,6 +601,18 @@ export function libraryPatchTrack(args: {
   return invoke<void>('library_patch_track', { ...args, serverId: indexKey });
 }
 
+/** Server favorites → `album.starred_at` (UPDATE only, no stub rows). */
+export function libraryReconcileAlbumStars(args: {
+  serverId: string;
+  starredAlbums: Array<{ id: string; starredAt: number }>;
+}): Promise<void> {
+  const indexKey = serverIndexKeyForId(args.serverId);
+  return invoke<void>('library_reconcile_album_stars', {
+    serverId: indexKey,
+    starredAlbums: args.starredAlbums.map(a => ({ id: a.id, starredAt: a.starredAt })),
+  });
+}
+
 export function libraryPutArtifact(args: {
   serverId: string;
   trackId: string;
@@ -686,6 +700,18 @@ export type PlaySessionYearBounds = {
   minYear: number | null;
   maxYear: number | null;
 };
+
+export type CatalogYearBounds = {
+  minYear: number | null;
+  maxYear: number | null;
+};
+
+export function libraryGetCatalogYearBounds(args: { serverId: string }): Promise<CatalogYearBounds> {
+  const indexKey = serverIndexKeyForId(args.serverId);
+  return invoke<CatalogYearBounds>('library_get_catalog_year_bounds', {
+    serverId: indexKey,
+  });
+}
 
 export type PlaySessionRecentDay = {
   date: string;

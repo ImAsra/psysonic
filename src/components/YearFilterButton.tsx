@@ -2,16 +2,33 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarRange, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import FilterQuickClear from './FilterQuickClear';
+import {
+  ALBUM_YEAR_MAX,
+  ALBUM_YEAR_MIN,
+  clampAlbumYearFieldInput,
+  formatAlbumYearFilterLabel,
+  normalizeAlbumYearToFieldChange,
+  resolveAlbumYearBounds,
+  stepAlbumYearField,
+} from '../utils/library/albumYearFilter';
 
 interface Props {
   from: string;
   to: string;
   onChange: (from: string, to: string) => void;
+  /** When set, spinners are limited to the indexed catalog (from `library_get_catalog_year_bounds`). */
+  catalogMinYear?: number;
+  catalogMaxYear?: number;
 }
 
-const CURRENT_YEAR = new Date().getFullYear();
-
-export default function YearFilterButton({ from, to, onChange }: Props) {
+export default function YearFilterButton({
+  from,
+  to,
+  onChange,
+  catalogMinYear,
+  catalogMaxYear,
+}: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [popStyle, setPopStyle] = useState<React.CSSProperties>({});
@@ -20,9 +37,11 @@ export default function YearFilterButton({ from, to, onChange }: Props) {
   const popRef = useRef<HTMLDivElement>(null);
   const fromRef = useRef<HTMLInputElement>(null);
 
-  const fromNum = parseInt(from, 10);
-  const toNum = parseInt(to, 10);
-  const active = !isNaN(fromNum) && !isNaN(toNum) && fromNum >= 1 && toNum >= 1;
+  const yMin = catalogMinYear ?? ALBUM_YEAR_MIN;
+  const yMax = catalogMaxYear ?? ALBUM_YEAR_MAX;
+
+  const { active, bounds } = resolveAlbumYearBounds(from, to);
+  const activeLabel = formatAlbumYearFilterLabel(bounds, { min: yMin, max: yMax });
 
   const updatePopStyle = () => {
     if (!triggerRef.current) return;
@@ -87,6 +106,27 @@ export default function YearFilterButton({ from, to, onChange }: Props) {
     onChange('', '');
   };
 
+  const handleFromChange = (raw: string) => {
+    onChange(clampAlbumYearFieldInput(raw, yMin, yMax), to);
+  };
+
+  const handleToChange = (raw: string) => {
+    onChange(from, normalizeAlbumYearToFieldChange(to, raw, yMin, yMax));
+  };
+
+  const onYearWheel = (
+    e: React.WheelEvent<HTMLInputElement>,
+    field: 'from' | 'to',
+  ) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 1 : -1;
+    if (field === 'from') {
+      onChange(stepAlbumYearField(from, delta, yMin, yMax, 'min'), to);
+    } else {
+      onChange(from, stepAlbumYearField(to, delta, yMin, yMax, 'max'));
+    }
+  };
+
   return (
     <>
       <button
@@ -102,7 +142,8 @@ export default function YearFilterButton({ from, to, onChange }: Props) {
         }}
       >
         <CalendarRange size={14} />
-        {active ? `${fromNum}–${toNum}` : t('albums.yearFilterLabel')}
+        {active && activeLabel ? activeLabel : t('albums.yearFilterLabel')}
+        {active && <FilterQuickClear onActiveChip onClear={clear} />}
       </button>
 
       {open && createPortal(
@@ -122,11 +163,12 @@ export default function YearFilterButton({ from, to, onChange }: Props) {
                   ref={fromRef}
                   className="input"
                   type="number"
-                  min={1900}
-                  max={CURRENT_YEAR}
-                  placeholder="1970"
+                  min={yMin}
+                  max={yMax}
+                  placeholder={String(yMin)}
                   value={from}
-                  onChange={e => onChange(e.target.value, to)}
+                  onChange={e => handleFromChange(e.target.value)}
+                  onWheel={e => onYearWheel(e, 'from')}
                 />
               </div>
               <span style={{ alignSelf: 'flex-end', paddingBottom: '0.4rem', color: 'var(--text-muted)' }}>–</span>
@@ -137,11 +179,12 @@ export default function YearFilterButton({ from, to, onChange }: Props) {
                 <input
                   className="input"
                   type="number"
-                  min={1900}
-                  max={CURRENT_YEAR}
-                  placeholder={String(CURRENT_YEAR)}
+                  min={yMin}
+                  max={yMax}
+                  placeholder={String(yMax)}
                   value={to}
-                  onChange={e => onChange(from, e.target.value)}
+                  onChange={e => handleToChange(e.target.value)}
+                  onWheel={e => onYearWheel(e, 'to')}
                 />
               </div>
             </div>

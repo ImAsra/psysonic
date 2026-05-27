@@ -26,6 +26,7 @@ import { libraryScopeForServer } from '../../api/subsonicClient';
 import { libraryIsReady } from './libraryReady';
 import { logLibrarySearch, timed } from './libraryDevLog';
 import { isLosslessSuffix } from './losslessFormats';
+import { albumIsCompilation } from './albumCompilation';
 import { OXIMEDIA_MOOD_SEARCH_ENABLED } from './trackEnrichment';
 
 export type AdvancedResultType = 'all' | 'artists' | 'albums' | 'songs';
@@ -191,6 +192,15 @@ export function trackToSong(t: LibraryTrackDto): SubsonicSong {
   return merged;
 }
 
+/** Merge `raw_json` without nullish Subsonic fields wiping hot columns (e.g. year). */
+function mergeAlbumRawJson(base: SubsonicAlbum, raw: Partial<SubsonicAlbum>): SubsonicAlbum {
+  const merged = { ...base } as SubsonicAlbum & Record<string, unknown>;
+  for (const [key, value] of Object.entries(raw)) {
+    if (value != null && value !== '') merged[key] = value;
+  }
+  return merged;
+}
+
 export function albumToAlbum(a: LibraryAlbumDto): SubsonicAlbum {
   const raw = isObject(a.rawJson) ? a.rawJson : {};
   const base: SubsonicAlbum = {
@@ -205,7 +215,9 @@ export function albumToAlbum(a: LibraryAlbumDto): SubsonicAlbum {
     coverArt: a.coverArtId ?? a.id,
     starred: a.starredAt != null ? new Date(a.starredAt).toISOString() : undefined,
   };
-  return { ...base, ...(raw as Partial<SubsonicAlbum>) };
+  const merged = mergeAlbumRawJson(base, raw as Partial<SubsonicAlbum>);
+  if (albumIsCompilation(merged)) merged.isCompilation = true;
+  return merged;
 }
 
 export function artistToArtist(ar: LibraryArtistDto): SubsonicArtist {

@@ -27,7 +27,7 @@ import { useBrowseArtistTextSearch } from '../hooks/useBrowseArtistTextSearch';
 import { useMainstageInpageHeaderTight } from '../hooks/useMainstageInpageHeaderTight';
 import { useArtistsInfiniteScroll } from '../hooks/useArtistsInfiniteScroll';
 import { useLibraryIndexStore } from '../store/libraryIndexStore';
-import { runLocalBrowseAllArtists } from '../utils/library/browseTextSearch';
+import { fetchNetworkStarredArtists, runLocalBrowseAllArtists } from '../utils/library/browseTextSearch';
 import { ArtistsGridView } from '../components/artists/ArtistsGridView';
 import { ArtistsListView } from '../components/artists/ArtistsListView';
 
@@ -96,17 +96,19 @@ export default function Artists() {
     let cancelled = false;
     setLoading(true);
     void (async () => {
-      if (indexEnabled && serverId) {
-        const local = await runLocalBrowseAllArtists(serverId);
-        if (!cancelled && local != null) {
-          setCatalogArtists(local);
-          setLoading(false);
+      try {
+        if (starredOnly) {
+          if (!cancelled) setCatalogArtists(await fetchNetworkStarredArtists());
           return;
         }
-      }
-      try {
-        const data = await getArtists();
-        if (!cancelled) setCatalogArtists(data);
+        if (indexEnabled && serverId) {
+          const local = await runLocalBrowseAllArtists(serverId);
+          if (!cancelled && local != null) {
+            setCatalogArtists(local);
+            return;
+          }
+        }
+        if (!cancelled) setCatalogArtists(await getArtists());
       } catch {
         /* ignore */
       } finally {
@@ -116,7 +118,7 @@ export default function Artists() {
     return () => {
       cancelled = true;
     };
-  }, [musicLibraryFilterVersion, indexEnabled, serverId]);
+  }, [musicLibraryFilterVersion, indexEnabled, serverId, starredOnly]);
 
   const {
     filtered, visible, hasMore, groups, letters, artistListFlatRows,

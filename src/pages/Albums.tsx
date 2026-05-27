@@ -1,9 +1,6 @@
 import { buildDownloadUrl } from '../api/subsonicStreamUrl';
-import { getAlbumsByGenre } from '../api/subsonicGenres';
-import { getAlbumList, getAlbum } from '../api/subsonicLibrary';
-import type { SubsonicAlbum } from '../api/subsonicTypes';
+import { getAlbum } from '../api/subsonicLibrary';
 import { songToTrack } from '../utils/playback/songToTrack';
-import { dedupeById } from '../utils/dedupeById';
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import AlbumCard from '../components/AlbumCard';
 import { albumGridWarmCovers, coverDisplayCssPxForAlbumGrid } from '../cover/layoutSizes';
@@ -26,6 +23,7 @@ import { join } from '@tauri-apps/api/path';
 import { showToast } from '../utils/ui/toast';
 import { useZipDownloadStore } from '../store/zipDownloadStore';
 import { CheckSquare2, Download, HardDriveDownload, Disc3, ListPlus } from 'lucide-react';
+import FilterQuickClear from '../components/FilterQuickClear';
 import { usePerfProbeFlags } from '../utils/perf/perfFlags';
 import { useRangeSelection } from '../hooks/useRangeSelection';
 import { useMainstageInpageHeaderTight } from '../hooks/useMainstageInpageHeaderTight';
@@ -33,26 +31,16 @@ import { VirtualCardGrid } from '../components/VirtualCardGrid';
 import OverlayScrollArea from '../components/OverlayScrollArea';
 import { ALBUMS_INPAGE_SCROLL_VIEWPORT_ID } from '../constants/appScroll';
 import { useLibraryIndexStore } from '../store/libraryIndexStore';
-import {
-  runLocalAlbumBrowsePage,
-  runLocalAlbumsByGenres,
-  runLocalLosslessAlbums,
-  type AlbumBrowseSort,
-} from '../utils/library/browseTextSearch';
+import { useAlbumBrowseFilters } from '../hooks/useAlbumBrowseFilters';
+import { useAlbumBrowseData } from '../hooks/useAlbumBrowseData';
+import { useAlbumCatalogYearBounds } from '../hooks/useAlbumCatalogYearBounds';
+import type { AlbumBrowseSort } from '../utils/library/albumBrowseSort';
 import { LOSSLESS_MODE_QUERY } from '../utils/library/losslessMode';
 
 type SortType = AlbumBrowseSort;
-type CompFilter = 'all' | 'only' | 'hide';
-
-const PAGE_SIZE = 30;
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'download';
-}
-
-async function fetchByGenres(genres: string[]): Promise<SubsonicAlbum[]> {
-  const results = await Promise.all(genres.map(g => getAlbumsByGenre(g, 500, 0)));
-  return dedupeById(results.flat());
 }
 
 export default function Albums() {
@@ -62,20 +50,56 @@ export default function Albums() {
   const auth = useAuthStore();
   const serverId = useAuthStore(s => s.activeServerId ?? '');
   const indexEnabled = useLibraryIndexStore(s => s.isIndexEnabled(serverId));
+  const catalogYears = useAlbumCatalogYearBounds(serverId, indexEnabled, musicLibraryFilterVersion);
   const downloadAlbum = useOfflineStore(s => s.downloadAlbum);
   const requestDownloadFolder = useDownloadModalStore(s => s.requestFolder);
 
-  const [albums, setAlbums] = useState<SubsonicAlbum[]>([]);
-  const [sort, setSort] = useState<SortType>('alphabeticalByName');
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
-  const [yearFrom, setYearFrom] = useState('');
-  const [yearTo, setYearTo] = useState('');
-  const [compFilter, setCompFilter] = useState<CompFilter>('all');
-  const [starredOnly, setStarredOnly] = useState(false);
-  const [losslessOnly, setLosslessOnly] = useState(false);
+  const {
+    sort,
+    onSortChange,
+    selectedGenres,
+    setSelectedGenres,
+    yearFrom,
+    setYearFrom,
+    yearTo,
+    setYearTo,
+    compFilter,
+    setCompFilter,
+    starredOnly,
+    setStarredOnly,
+    losslessOnly,
+    setLosslessOnly,
+  } = useAlbumBrowseFilters(serverId);
+
+  const starredOverrides = usePlayerStore(s => s.starredOverrides);
+  const {
+    albums,
+    loading,
+    hasMore,
+    visibleAlbums,
+    genreFiltered,
+    serverFilterActive,
+    narrowGenreList,
+    genreCatalogOptions,
+    yearFilterActive,
+    debouncedYearFields,
+    compFilterActive,
+    pendingClientFilterMatch,
+    loadMore,
+  } = useAlbumBrowseData({
+    serverId,
+    indexEnabled,
+    musicLibraryFilterVersion,
+    sort,
+    selectedGenres,
+    yearFrom,
+    yearTo,
+    losslessOnly,
+    starredOnly,
+    compFilter,
+    starredOverrides,
+  });
+
   const observerTarget = useRef<HTMLDivElement>(null);
   const gridMeasureRef = useRef<HTMLDivElement>(null);
   const maxGridCols = useAuthStore(s => clampLibraryGridMaxColumns(s.libraryGridMaxColumns));
@@ -92,18 +116,6 @@ export default function Albums() {
   // selectedIds + toggleSelect come from useRangeSelection (declared after
   // `visibleAlbums` so Shift-click range expansion follows the visible order).
   const [selectionMode, setSelectionMode] = useState(false);
-
-  const starredOverrides = usePlayerStore(s => s.starredOverrides);
-  const clientFilterActive = starredOnly || compFilter !== 'all';
-  const visibleAlbums = useMemo(() => {
-    let out = albums;
-    if (compFilter === 'only') out = out.filter(a => a.isCompilation);
-    else if (compFilter === 'hide') out = out.filter(a => !a.isCompilation);
-    if (starredOnly) {
-      out = out.filter(a => a.id in starredOverrides ? starredOverrides[a.id] : !!a.starred);
-    }
-    return out;
-  }, [albums, compFilter, starredOnly, starredOverrides]);
 
   const { selectedIds, toggleSelect, clearSelection: resetSelection } = useRangeSelection(visibleAlbums);
 
@@ -178,15 +190,6 @@ export default function Albums() {
     clearSelection();
   };
 
-  // ── Data loading ─────────────────────────────────────────────────────────
-  const genreFiltered = selectedGenres.length > 0;
-  const fromNum = parseInt(yearFrom, 10);
-  const toNum = parseInt(yearTo, 10);
-  const yearActive = !isNaN(fromNum) && !isNaN(toNum) && fromNum >= 1 && toNum >= 1;
-
-  const pendingClientFilterMatch =
-    clientFilterActive && visibleAlbums.length === 0 && hasMore && !genreFiltered;
-
   const visibleEmptyMessage = useMemo(() => {
     if (starredOnly) return t('albums.noFavorites');
     if (compFilter === 'only') return t('albums.noCompilations');
@@ -219,152 +222,14 @@ export default function Albums() {
   const mainstageHeaderTight = useMainstageInpageHeaderTight(scrollBodyEl, [
     sort,
     genreFiltered,
-    yearActive,
-    yearFrom,
-    yearTo,
+    yearFilterActive,
+    debouncedYearFields.from,
+    debouncedYearFields.to,
     compFilter,
     starredOnly,
     losslessOnly,
     selectionMode,
     selectedGenres,
-  ]);
-
-  const load = useCallback(async (
-    sortType: SortType,
-    offset: number,
-    append = false,
-    yearFilter?: { from: number; to: number },
-    lossless = false,
-  ) => {
-    setLoading(true);
-    try {
-      if (lossless) {
-        if (!indexEnabled || !serverId) {
-          setAlbums([]);
-          setHasMore(false);
-          return;
-        }
-        if (!yearFilter) {
-          const page = await runLocalLosslessAlbums(serverId, PAGE_SIZE, offset);
-          if (!page) {
-            setAlbums([]);
-            setHasMore(false);
-            return;
-          }
-          if (append) setAlbums(prev => dedupeById([...prev, ...page.albums]));
-          else setAlbums(page.albums);
-          setHasMore(page.hasMore);
-          return;
-        }
-        const data = await runLocalAlbumBrowsePage(
-          serverId,
-          sortType,
-          offset,
-          PAGE_SIZE,
-          yearFilter,
-          true,
-        );
-        if (data == null) {
-          setAlbums([]);
-          setHasMore(false);
-          return;
-        }
-        if (append) setAlbums(prev => [...prev, ...data]);
-        else setAlbums(data);
-        setHasMore(data.length === PAGE_SIZE);
-        return;
-      }
-
-      let data: SubsonicAlbum[] | null = null;
-      if (indexEnabled && serverId) {
-        data = await runLocalAlbumBrowsePage(
-          serverId,
-          sortType,
-          offset,
-          PAGE_SIZE,
-          yearFilter,
-          false,
-        );
-      }
-      if (data == null) {
-        const extra = yearFilter ? { fromYear: yearFilter.from, toYear: yearFilter.to } : {};
-        const type = yearFilter ? 'byYear' : sortType;
-        data = await getAlbumList(type, PAGE_SIZE, offset, extra);
-      }
-      if (append) setAlbums(prev => [...prev, ...data]);
-      else setAlbums(data);
-      setHasMore(data.length === PAGE_SIZE);
-    } finally {
-      setLoading(false);
-    }
-  }, [musicLibraryFilterVersion, indexEnabled, serverId]);
-
-  const loadFiltered = useCallback(async (
-    genres: string[],
-    sortType: SortType,
-    lossless: boolean,
-  ) => {
-    setLoading(true);
-    try {
-      if (lossless) {
-        if (!indexEnabled || !serverId) {
-          setAlbums([]);
-          setHasMore(false);
-          return;
-        }
-        const data = await runLocalAlbumsByGenres(serverId, genres, sortType, undefined, true);
-        setAlbums(data ?? []);
-        setHasMore(false);
-        return;
-      }
-
-      let data: SubsonicAlbum[] | null = null;
-      if (indexEnabled && serverId) {
-        data = await runLocalAlbumsByGenres(serverId, genres, sortType);
-      }
-      if (data == null) {
-        data = await fetchByGenres(genres);
-        data = [...data].sort((a, b) =>
-          sortType === 'alphabeticalByArtist'
-            ? a.artist.localeCompare(b.artist)
-            : a.name.localeCompare(b.name),
-        );
-      }
-      setAlbums(data);
-      setHasMore(false);
-    } finally {
-      setLoading(false);
-    }
-  }, [musicLibraryFilterVersion, indexEnabled, serverId]);
-
-  useEffect(() => {
-    setPage(0);
-    if (genreFiltered) {
-      loadFiltered(selectedGenres, sort, losslessOnly);
-    } else if (yearActive) {
-      load(sort, 0, false, { from: fromNum, to: toNum }, losslessOnly);
-    } else {
-      load(sort, 0, false, undefined, losslessOnly);
-    }
-  }, [sort, genreFiltered, selectedGenres, yearActive, fromNum, toNum, losslessOnly, load, loadFiltered]);
-
-  const loadMore = useCallback(() => {
-    if (loading || !hasMore || genreFiltered) return;
-    const next = page + 1;
-    setPage(next);
-    const yf = yearActive ? { from: fromNum, to: toNum } : undefined;
-    load(sort, next * PAGE_SIZE, true, yf, losslessOnly);
-  }, [
-    loading,
-    hasMore,
-    page,
-    sort,
-    load,
-    genreFiltered,
-    yearActive,
-    fromNum,
-    toNum,
-    losslessOnly,
   ]);
 
   useEffect(() => {
@@ -385,11 +250,6 @@ export default function Albums() {
     observer.observe(node);
     return () => observer.disconnect();
   }, [loadMore, scrollBodyEl]);
-
-  useEffect(() => {
-    if (!pendingClientFilterMatch || loading) return;
-    loadMore();
-  }, [pendingClientFilterMatch, loading, loadMore]);
 
   const sortOptions: { value: SortType; label: string }[] = [
     { value: 'alphabeticalByName',   label: t('albums.sortByName') },
@@ -424,21 +284,25 @@ export default function Albums() {
                 </>
               ) : (
                 <>
-                  {!yearActive && (
-                    <SortDropdown
-                      value={sort}
-                      options={sortOptions}
-                      onChange={setSort}
-                    />
-                  )}
+                  <SortDropdown
+                    value={sort}
+                    options={sortOptions}
+                    onChange={onSortChange}
+                  />
 
                   <YearFilterButton
                     from={yearFrom}
                     to={yearTo}
+                    catalogMinYear={catalogYears.min}
+                    catalogMaxYear={catalogYears.max}
                     onChange={(from, to) => { setYearFrom(from); setYearTo(to); }}
                   />
 
-                  <GenreFilterBar selected={selectedGenres} onSelectionChange={setSelectedGenres} />
+                  <GenreFilterBar
+                    selected={selectedGenres}
+                    catalogGenres={narrowGenreList ? genreCatalogOptions : null}
+                    onSelectionChange={setSelectedGenres}
+                  />
 
                   <StarFilterButton active={starredOnly} onChange={setStarredOnly} />
 
@@ -464,6 +328,9 @@ export default function Albums() {
                     {compFilter === 'all' ? t('albums.compilationLabel')
                       : compFilter === 'only' ? t('albums.compilationOnly')
                       : t('albums.compilationHide')}
+                    {compFilter !== 'all' && (
+                      <FilterQuickClear onActiveChip onClear={() => setCompFilter('all')} />
+                    )}
                   </button>
                 </>
               )}
@@ -500,11 +367,11 @@ export default function Albums() {
           perfFlags.disableMainstageVirtualLists,
         ]}
       >
-        {(loading && albums.length === 0) || pendingClientFilterMatch ? (
+        {loading && albums.length === 0 ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
             <div className="spinner" />
           </div>
-        ) : !loading && albums.length === 0 && !genreFiltered && !yearActive && !clientFilterActive && !losslessOnly ? (
+        ) : !loading && albums.length === 0 && !serverFilterActive && !compFilterActive ? (
           <div className="empty-state" style={{ padding: '3rem 1rem', textAlign: 'center' }}>
             {t('common.libraryEmpty')}
           </div>
@@ -512,7 +379,11 @@ export default function Albums() {
           <div className="empty-state" style={{ padding: '3rem 1rem', textAlign: 'center' }}>
             {t('losslessAlbums.empty')}
           </div>
-        ) : !loading && visibleAlbums.length === 0 && clientFilterActive ? (
+        ) : !loading && visibleAlbums.length === 0 && pendingClientFilterMatch ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
+            <div className="spinner" />
+          </div>
+        ) : !loading && visibleAlbums.length === 0 && (starredOnly || compFilterActive) ? (
           <div className="empty-state" style={{ padding: '3rem 1rem', textAlign: 'center' }}>
             {visibleEmptyMessage}
           </div>

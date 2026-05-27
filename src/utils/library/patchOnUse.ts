@@ -10,13 +10,22 @@ type TrackPatch = {
   playedAt?: number | null;
 };
 
+/** Optional metadata on star/unstar (album/artist); not mirrored into the local index. */
+export type StarPatchMeta = {
+  name?: string;
+  artist?: string;
+  artistId?: string;
+  coverArtId?: string;
+  year?: number;
+  albumCount?: number;
+};
+
 /**
- * Patch-on-use (spec §6.5 / F3): after a successful star / rating / scrobble,
- * mirror the change into the local library index so its reads (browse F1,
- * advanced search F2) reflect the action immediately — no stale list after a
- * rate, no full resync. Skipped when the index is off for the server; the Rust
- * command additionally no-ops when no row exists / the id is not a track.
- * Fire-and-forget: never throws, never blocks the originating network action.
+ * Patch-on-use (spec §6.5 / F3): after a successful star / rating / scrobble on a
+ * **track**, mirror the change into the local library index. Skipped when the index
+ * is off; Rust no-ops when no row exists. Fire-and-forget.
+ *
+ * Album/artist stars are server-only on browse (no stub rows, no `artist.starred_at`).
  */
 export function patchLibraryTrackOnUse(
   serverId: string | null | undefined,

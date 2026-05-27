@@ -1,18 +1,45 @@
 import { getGenres } from '../api/subsonicGenres';
+import type { GenreFilterOption } from '../utils/library/albumBrowseLoad';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Filter, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import FilterQuickClear from './FilterQuickClear';
+
+type GenreRow = GenreFilterOption;
+
+function mergeGenreRows(
+  catalogGenres: GenreFilterOption[],
+  selected: string[],
+): GenreRow[] {
+  const byGenre = new Map<string, number>();
+  for (const { genre, count } of catalogGenres) byGenre.set(genre, count);
+  for (const genre of selected) {
+    if (!byGenre.has(genre)) byGenre.set(genre, 0);
+  }
+  return [...byGenre.entries()]
+    .map(([genre, count]) => ({ genre, count }))
+    .sort((a, b) => b.count - a.count || a.genre.localeCompare(b.genre));
+}
 
 interface GenreFilterBarProps {
   selected: string[];
   onSelectionChange: (selected: string[]) => void;
+  /**
+   * When set, only these genres are listed (e.g. from the current non-genre filters).
+   * `undefined` = full server genre list from `getGenres`.
+   */
+  catalogGenres?: GenreFilterOption[] | null;
 }
 
-export default function GenreFilterBar({ selected, onSelectionChange }: GenreFilterBarProps) {
+export default function GenreFilterBar({
+  selected,
+  onSelectionChange,
+  catalogGenres,
+}: GenreFilterBarProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [genres, setGenres] = useState<string[]>([]);
+  const [genreRows, setGenreRows] = useState<GenreRow[]>([]);
   const [search, setSearch] = useState('');
   const [popStyle, setPopStyle] = useState<React.CSSProperties>({});
 
@@ -21,30 +48,30 @@ export default function GenreFilterBar({ selected, onSelectionChange }: GenreFil
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getGenres().then(data =>
-      setGenres(data.map(g => g.value).sort((a, b) => a.localeCompare(b)))
-    );
-  }, []);
+    if (catalogGenres != null) {
+      setGenreRows(mergeGenreRows(catalogGenres, selected));
+      return;
+    }
+    let cancelled = false;
+    getGenres().then(data => {
+      if (cancelled) return;
+      const rows: GenreRow[] = data
+        .map(g => ({ genre: g.value, count: g.albumCount ?? 0 }))
+        .sort((a, b) => b.count - a.count || a.genre.localeCompare(b.genre));
+      setGenreRows(mergeGenreRows(rows, selected));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [catalogGenres, selected]);
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
-  // Selected on top, then alphabetical (stable for comfortable scanning).
-  const sortedGenres = useMemo(() => {
-    const arr = [...genres];
-    arr.sort((a, b) => {
-      const sa = selectedSet.has(a) ? 0 : 1;
-      const sb = selectedSet.has(b) ? 0 : 1;
-      if (sa !== sb) return sa - sb;
-      return a.localeCompare(b);
-    });
-    return arr;
-  }, [genres, selectedSet]);
-
   const filteredGenres = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return sortedGenres;
-    return sortedGenres.filter(g => g.toLowerCase().includes(q));
-  }, [sortedGenres, search]);
+    if (!q) return genreRows;
+    return genreRows.filter(({ genre }) => genre.toLowerCase().includes(q));
+  }, [genreRows, search]);
 
   const updatePopStyle = () => {
     if (!triggerRef.current) return;
@@ -131,6 +158,7 @@ export default function GenreFilterBar({ selected, onSelectionChange }: GenreFil
         <Filter size={14} />
         {t('common.filterGenre')}
         {count > 0 && <span className="genre-filter-count">{count}</span>}
+        {count > 0 && <FilterQuickClear onActiveChip onClear={clear} />}
       </button>
 
       {open && createPortal(
@@ -149,7 +177,7 @@ export default function GenreFilterBar({ selected, onSelectionChange }: GenreFil
               onChange={e => setSearch(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter' && filteredGenres.length > 0) {
-                  toggle(filteredGenres[0]);
+                  toggle(filteredGenres[0].genre);
                 }
               }}
             />
@@ -161,21 +189,24 @@ export default function GenreFilterBar({ selected, onSelectionChange }: GenreFil
                 {t('common.filterNoGenres')}
               </div>
             ) : (
-              filteredGenres.map(g => {
-                const isSel = selectedSet.has(g);
+              filteredGenres.map(({ genre, count: albumCount }) => {
+                const isSel = selectedSet.has(genre);
                 return (
                   <div
-                    key={g}
+                    key={genre}
                     className={`genre-filter-popover__option${isSel ? ' genre-filter-popover__option--selected' : ''}`}
-                    onClick={() => toggle(g)}
+                    onClick={() => toggle(genre)}
                     role="option"
                     aria-selected={isSel}
                   >
                     <span className="genre-filter-popover__check">
                       {isSel && <Check size={12} strokeWidth={3} />}
                     </span>
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {g}
+                    <span className="genre-filter-popover__label">
+                      {genre}
+                    </span>
+                    <span className="genre-filter-popover__album-count" aria-hidden>
+                      {albumCount}
                     </span>
                   </div>
                 );

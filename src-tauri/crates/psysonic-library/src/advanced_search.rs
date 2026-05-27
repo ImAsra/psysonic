@@ -11,6 +11,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use rusqlite::types::Value as SqlValue;
+use rusqlite::{params, OptionalExtension};
 use serde_json::Value;
 
 use crate::dto::{
@@ -33,8 +34,10 @@ fn bpm_resolved_sql() -> String {
 }
 
 const ALBUM_COLUMNS: &str = "a.server_id, a.id, a.name, a.artist, a.artist_id, \
-  a.song_count, a.duration_sec, a.year, a.genre, a.cover_art_id, a.starred_at, \
-  a.synced_at, a.raw_json";
+  a.song_count, a.duration_sec, \
+  COALESCE(a.year, (SELECT MAX(t.year) FROM track t \
+    WHERE t.server_id = a.server_id AND t.album_id = a.id AND t.deleted = 0)), \
+  a.genre, a.cover_art_id, a.starred_at, a.synced_at, a.raw_json";
 
 const ARTIST_COLUMNS: &str = "ar.server_id, ar.id, ar.name, ar.album_count, \
   ar.synced_at, ar.raw_json";
@@ -285,6 +288,23 @@ fn map_track_row_resolved_bpm(row: &rusqlite::Row<'_>) -> rusqlite::Result<Libra
     crate::search::row_to_track_dto_resolved_bpm(row)
 }
 
+/// Sync is track-first; the `album` table is often empty or holds only
+/// patch-on-use stubs. Normal browse must not treat a handful of album rows
+/// as the full catalog.
+fn server_has_indexed_tracks(store: &LibraryStore, server_id: &str) -> Result<bool, String> {
+    store
+        .with_read_conn(|conn| {
+            conn.query_row(
+                "SELECT 1 FROM track WHERE server_id = ?1 AND deleted = 0 LIMIT 1",
+                params![server_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|r| r.is_some())
+        })
+        .map_err(|e| e.to_string())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_album(
     store: &LibraryStore,
@@ -299,6 +319,19 @@ fn build_album(
     if scalar_requires_lossless_track_grouping(scalar) {
         return build_album_from_tracks(
             store, req, text, scalar, limit, offset, skip_totals, applied, true,
+        );
+    }
+    // Album browse favorites: album-level stars only (`a.starred_at`), not
+    // track-derived groups with `t.starred_at`.
+    if req.starred_only == Some(true) {
+        return build_album_from_table(store, req, text, scalar, limit, offset, skip_totals, applied);
+    }
+    if server_has_indexed_tracks(store, &req.server_id)? {
+        if let Some(q) = text.and_then(fts_album_prefix_match_query) {
+            return build_album_from_fts(store, req, &q, scalar, limit, offset, skip_totals, applied);
+        }
+        return build_album_from_tracks(
+            store, req, text, scalar, limit, offset, skip_totals, applied, false,
         );
     }
     if !scalar_requires_track_derived_entities(scalar) {
@@ -344,6 +377,12 @@ fn build_album_from_table(
         w.push_raw("a.starred_at IS NOT NULL");
         applied.insert("starred".to_string());
     }
+    push_album_id_allowlist(
+        &mut w,
+        "a.id",
+        req.restrict_album_ids.as_deref(),
+        applied,
+    );
 
     let order = order_clause(&req.sort, EntityKind::Album)
         .unwrap_or_else(|| "ORDER BY a.name COLLATE NOCASE ASC, a.id ASC".to_string());
@@ -379,8 +418,12 @@ fn build_album_from_tracks(
     w.push_param("t.server_id = ?", SqlValue::Text(req.server_id.clone()));
     w.push_raw("t.album_id IS NOT NULL AND t.album_id != ''");
     if !include_album_table_rows {
+        // Skip track groups only when the album table has a full row (synced
+        // metadata). Patch-on-use stubs omit `song_count` and must not hide the
+        // track-derived catalog entry.
         w.push_raw(
-            "NOT EXISTS (SELECT 1 FROM album a WHERE a.server_id = t.server_id AND a.id = t.album_id)",
+            "NOT EXISTS (SELECT 1 FROM album a WHERE a.server_id = t.server_id \
+             AND a.id = t.album_id AND a.song_count IS NOT NULL)",
         );
     }
     if let Some(scope) = trimmed_nonempty(req.library_scope.as_deref()) {
@@ -401,6 +444,12 @@ fn build_album_from_tracks(
         w.push_raw("t.starred_at IS NOT NULL");
         applied.insert("starred".to_string());
     }
+    push_album_id_allowlist(
+        &mut w,
+        "t.album_id",
+        req.restrict_album_ids.as_deref(),
+        applied,
+    );
 
     let select = "t.server_id, t.album_id, MAX(t.album), MAX(t.artist), MAX(t.artist_id), \
         COUNT(*), SUM(t.duration_sec), MAX(t.year), MAX(t.genre), MAX(t.cover_art_id), \
@@ -462,15 +511,12 @@ fn build_artist_from_table(
         w.push_param("ar.name LIKE ? ESCAPE '\\'", SqlValue::Text(like_contains(t)));
         applied.insert("text".to_string());
     }
-    // Only `text` routes to artist with a real column; other registered
-    // fields resolve to `None` (skip). `starredOnly` has no artist column.
     for c in scalar {
         if let Some(frag) = resolve_clause(c, EntityKind::Artist)? {
             applied.insert(c.field.clone());
             w.push(frag);
         }
     }
-
     let order = order_clause(&req.sort, EntityKind::Artist)
         .unwrap_or_else(|| "ORDER BY ar.name COLLATE NOCASE ASC, ar.id ASC".to_string());
     query_rows(
@@ -584,6 +630,12 @@ fn build_album_from_fts(
         w.push_raw("t.starred_at IS NOT NULL");
         applied.insert("starred".to_string());
     }
+    push_album_id_allowlist(
+        &mut w,
+        "t.album_id",
+        req.restrict_album_ids.as_deref(),
+        applied,
+    );
 
     let where_sql = w.where_sql();
     store.with_read_conn(|conn| {
@@ -784,8 +836,7 @@ fn resolve_clause(
         ("year", EntityKind::Album) => "a.year",
         ("starred", EntityKind::Track) => "t.starred_at",
         ("starred", EntityKind::Album) => "a.starred_at",
-        // `starred` routes to artist in the registry, but the `artist`
-        // table has no `starred_at` column — skip rather than error.
+        // `artist` has no `starred_at` column — favorites use the network list.
         ("starred", EntityKind::Artist) => return Ok(None),
         ("mood_group" | "mood_tag", EntityKind::Track) => {
             return crate::advanced_search_mood::resolve_mood_clause(c);
@@ -808,6 +859,13 @@ fn resolve_clause(
                 params: vec![],
             }));
         }
+        ("compilation", EntityKind::Album) => {
+            return compilation_filter_fragment(&c.field, c.op, c.value.as_ref(), "a");
+        }
+        ("compilation", EntityKind::Track) => {
+            return compilation_filter_fragment(&c.field, c.op, c.value.as_ref(), "t");
+        }
+        ("compilation", _) => return Ok(None),
         // `text` is handled by the entity builder (FTS / LIKE), never here.
         ("text", _) => return Ok(None),
         // Registered but no v1 SQL builder (user_rating / suffix / bit_rate).
@@ -870,6 +928,30 @@ fn count_matching_rows(
         |r| r.get(0),
     )?;
     Ok(n.max(0) as u32)
+}
+
+/// Restrict album browse to an explicit id set (server favorites ∩ local filters).
+fn push_album_id_allowlist(
+    w: &mut WhereBuilder,
+    column: &str,
+    ids: Option<&[String]>,
+    applied: &mut BTreeSet<String>,
+) {
+    let Some(ids) = ids else {
+        return;
+    };
+    applied.insert("albumIds".to_string());
+    if ids.is_empty() {
+        w.push_raw("1 = 0");
+        return;
+    }
+    let placeholders = std::iter::repeat_n("?", ids.len()).collect::<Vec<_>>().join(", ");
+    let sql = format!("{column} IN ({placeholders})");
+    let params = ids
+        .iter()
+        .map(|id| SqlValue::Text(id.clone()))
+        .collect();
+    w.push_params(&sql, params);
 }
 
 /// Accumulates `AND`-joined WHERE clauses and their positional params in
@@ -1160,6 +1242,48 @@ fn sort_column(field: &str, entity: EntityKind) -> Option<&'static str> {
     }
 }
 
+fn compilation_filter_fragment(
+    field: &str,
+    op: FilterOp,
+    value: Option<&Value>,
+    table_alias: &str,
+) -> Result<Option<SqlFragment>, String> {
+    let comp_sql = crate::album_compilation_filter::compilation_raw_json_sql(table_alias);
+    match op {
+        FilterOp::IsTrue => Ok(Some(SqlFragment {
+            sql: comp_sql,
+            params: vec![],
+        })),
+        FilterOp::Eq => {
+            let want_comp = json_to_bool(field, value)?;
+            let sql = if want_comp {
+                comp_sql
+            } else {
+                format!("NOT ({comp_sql})")
+            };
+            Ok(Some(SqlFragment { sql, params: vec![] }))
+        }
+        _ => Err(filter::FilterError::UnsupportedOp {
+            field: field.to_string(),
+            op: op.as_str(),
+        }
+        .to_string()),
+    }
+}
+
+fn json_to_bool(field: &str, v: Option<&Value>) -> Result<bool, String> {
+    match v {
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(Value::Number(n)) => Ok(n.as_i64() == Some(1)),
+        Some(Value::String(s)) => Ok(matches!(s.as_str(), "1" | "true" | "TRUE")),
+        _ => Err(filter::FilterError::BadValue {
+            field: field.to_string(),
+            detail: "expected boolean".to_string(),
+        }
+        .to_string()),
+    }
+}
+
 fn json_to_text(field: &str, v: Option<&Value>) -> Result<SqlValue, String> {
     match v {
         Some(Value::String(s)) => Ok(SqlValue::Text(s.clone())),
@@ -1273,6 +1397,7 @@ mod tests {
             entity_types: entities.to_vec(),
             filters: Vec::new(),
             starred_only: None,
+            restrict_album_ids: None,
             sort: Vec::new(),
             limit: 50,
             offset: 0,
@@ -1453,6 +1578,58 @@ mod tests {
         let resp = run_advanced_search(&store, &r).unwrap();
         assert_eq!(resp.tracks.len(), 1);
         assert_eq!(resp.tracks[0].id, "t1");
+    }
+
+    #[test]
+    fn normal_album_browse_uses_track_catalog_when_album_table_is_sparse() {
+        let store = LibraryStore::open_in_memory();
+        insert_album(&store, "s1", "al_stub", "Starred Stub", None, None);
+        store
+            .with_conn("misc", |c| {
+                c.execute(
+                    "UPDATE album SET starred_at = 100 WHERE server_id = 's1' AND id = 'al_stub'",
+                    [],
+                )
+            })
+            .unwrap();
+        let mut a = track("s1", "t1", "A", "X", "Album A");
+        a.album_id = Some("al_a".into());
+        let mut b = track("s1", "t2", "B", "Y", "Album B");
+        b.album_id = Some("al_b".into());
+        TrackRepository::new(&store)
+            .upsert_batch(&[a, b])
+            .unwrap();
+        let r = req("s1", &[EntityKind::Album]);
+        let resp = run_advanced_search(&store, &r).unwrap();
+        let ids: Vec<&str> = resp.albums.iter().map(|a| a.id.as_str()).collect();
+        assert!(ids.contains(&"al_a"));
+        assert!(ids.contains(&"al_b"));
+        assert!(!ids.contains(&"al_stub"));
+    }
+
+    #[test]
+    fn starred_only_album_entity_uses_album_star_not_track_star() {
+        let store = LibraryStore::open_in_memory();
+        insert_album(&store, "s1", "al_star", "Starred Album", None, None);
+        store
+            .with_conn("misc", |c| {
+                c.execute(
+                    "UPDATE album SET starred_at = 100 WHERE server_id = 's1' AND id = 'al_star'",
+                    [],
+                )
+            })
+            .unwrap();
+        let mut track_star = track("s1", "t1", "T", "X", "TrackStar Alb");
+        track_star.album_id = Some("al_track_only".into());
+        track_star.starred_at = Some(200);
+        TrackRepository::new(&store)
+            .upsert_batch(&[track_star])
+            .unwrap();
+        let mut r = req("s1", &[EntityKind::Album]);
+        r.starred_only = Some(true);
+        let resp = run_advanced_search(&store, &r).unwrap();
+        assert_eq!(resp.albums.len(), 1);
+        assert_eq!(resp.albums[0].id, "al_star");
     }
 
     // ── bpm dual storage ───────────────────────────────────────────────
@@ -1684,6 +1861,36 @@ mod tests {
     }
 
     #[test]
+    fn restrict_album_ids_intersects_with_lossless_filter() {
+        let store = LibraryStore::open_in_memory();
+        insert_album(&store, "s1", "al_fav_lossless", "Fav Lossless", None, None);
+        insert_album(&store, "s1", "al_fav_lossy", "Fav Lossy", None, None);
+        insert_album(&store, "s1", "al_other_lossless", "Other Lossless", None, None);
+        let mut flac_fav = track("s1", "t1", "A", "X", "Alb");
+        flac_fav.album_id = Some("al_fav_lossless".into());
+        flac_fav.suffix = Some("flac".into());
+        let mut mp3_fav = track("s1", "t2", "B", "Y", "Alb2");
+        mp3_fav.album_id = Some("al_fav_lossy".into());
+        mp3_fav.suffix = Some("mp3".into());
+        let mut flac_other = track("s1", "t3", "C", "Z", "Alb3");
+        flac_other.album_id = Some("al_other_lossless".into());
+        flac_other.suffix = Some("flac".into());
+        TrackRepository::new(&store)
+            .upsert_batch(&[flac_fav, mp3_fav, flac_other])
+            .unwrap();
+        let mut r = req("s1", &[EntityKind::Album]);
+        r.filters = vec![clause("lossless", FilterOp::IsTrue, None, None)];
+        r.restrict_album_ids = Some(vec![
+            "al_fav_lossless".into(),
+            "al_fav_lossy".into(),
+        ]);
+        let resp = run_advanced_search(&store, &r).unwrap();
+        assert_eq!(resp.albums.len(), 1);
+        assert_eq!(resp.albums[0].id, "al_fav_lossless");
+        assert!(resp.applied_filters.contains(&"albumIds".to_string()));
+    }
+
+    #[test]
     fn lossless_and_year_filters_use_track_year_when_album_table_differs() {
         let store = LibraryStore::open_in_memory();
         insert_album(&store, "s1", "al1", "Hi-Res Album", Some(1990), None);
@@ -1741,6 +1948,80 @@ mod tests {
         let resp = run_advanced_search(&store, &r).unwrap();
         assert_eq!(resp.artists.len(), 1);
         assert_eq!(resp.artists[0].id, "ar1");
+    }
+
+    fn insert_album_raw(
+        store: &LibraryStore,
+        server: &str,
+        id: &str,
+        name: &str,
+        raw_json: &str,
+    ) {
+        store
+            .with_conn("misc", |c| {
+                c.execute(
+                    "INSERT INTO album (server_id, id, name, synced_at, raw_json) \
+                     VALUES (?1, ?2, ?3, 1, ?4)",
+                    rusqlite::params![server, id, name, raw_json],
+                )
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn compilation_filter_only_returns_compilation_albums() {
+        let store = LibraryStore::open_in_memory();
+        insert_album_raw(
+            &store,
+            "s1",
+            "al_comp",
+            "Greatest Hits",
+            r#"{"compilation":true}"#,
+        );
+        insert_album_raw(&store, "s1", "al_regular", "Studio", "{}");
+        let mut r = req("s1", &[EntityKind::Album]);
+        r.filters = vec![clause("compilation", FilterOp::IsTrue, None, None)];
+        let resp = run_advanced_search(&store, &r).unwrap();
+        assert_eq!(resp.albums.len(), 1);
+        assert_eq!(resp.albums[0].id, "al_comp");
+    }
+
+    #[test]
+    fn compilation_filter_on_track_grouped_album_browse() {
+        let store = LibraryStore::open_in_memory();
+        let mut comp = track("s1", "t_comp", "Hit", "VA", "Comp Album");
+        comp.album_id = Some("al_comp".into());
+        comp.raw_json = r#"{"compilation":true}"#.into();
+        let mut reg = track("s1", "t_reg", "Song", "Band", "Studio");
+        reg.album_id = Some("al_reg".into());
+        reg.raw_json = "{}".into();
+        TrackRepository::new(&store)
+            .upsert_batch(&[comp, reg])
+            .unwrap();
+        let mut r = req("s1", &[EntityKind::Album]);
+        r.filters = vec![clause("compilation", FilterOp::IsTrue, None, None)];
+        let resp = run_advanced_search(&store, &r).unwrap();
+        assert_eq!(resp.albums.len(), 1);
+        assert_eq!(resp.albums[0].id, "al_comp");
+        assert!(resp.applied_filters.contains(&"compilation".to_string()));
+    }
+
+    #[test]
+    fn compilation_eq_false_hides_compilations() {
+        let store = LibraryStore::open_in_memory();
+        insert_album_raw(
+            &store,
+            "s1",
+            "al_comp",
+            "Greatest Hits",
+            r#"{"releaseTypes":["Compilation"]}"#,
+        );
+        insert_album_raw(&store, "s1", "al_regular", "Studio", "{}");
+        let mut r = req("s1", &[EntityKind::Album]);
+        r.filters = vec![clause("compilation", FilterOp::Eq, Some(json!(false)), None)];
+        let resp = run_advanced_search(&store, &r).unwrap();
+        assert_eq!(resp.albums.len(), 1);
+        assert_eq!(resp.albums[0].id, "al_regular");
     }
 
     #[test]
