@@ -341,6 +341,13 @@ const CONTRIBUTOR_ENTRIES = [
       'Discord Rich Presence: configurable activity-name template — member list shows the playing track instead of "Psysonic" (PR #885)',
     ],
   },
+  {
+    github: 'ImAsra',
+    since: '1.47.0',
+    contributions: [
+      'Long-press album Play to shuffle with hold progress animation (PR #888)',
+    ],
+  },
 ] as const;
 
 // PR number of a contributor's first listed contribution, used as the
