@@ -1,13 +1,13 @@
 import { useMemo } from 'react';
 import { resolvePlaybackCoverScope } from './ref';
-import type { CoverArtHandle, CoverArtId } from './types';
+import type { CoverArtHandle, CoverArtRef } from './types';
 import { useCoverArt } from './useCoverArt';
 import { useAuthStore } from '../store/authStore';
 import { usePlayerStore } from '../store/playerStore';
 
 /** Cover art for playback queue — uses queue server when it differs from browsed server. */
 export function usePlaybackCoverArt(
-  coverArtId: CoverArtId | undefined,
+  coverRef: CoverArtRef | undefined,
   displayCssPx: number,
 ): CoverArtHandle {
   const queueServerId = usePlayerStore(s => s.queueServerId);
@@ -23,8 +23,11 @@ export function usePlaybackCoverArt(
     () => resolvePlaybackCoverScope(),
     [queueServerId, queueLength, activeServerId, serversFingerprint],
   );
-  return useCoverArt(coverArtId, displayCssPx, {
-    serverScope: scope,
+  const refWithScope = useMemo(
+    () => (coverRef ? { ...coverRef, serverScope: scope } : null),
+    [coverRef, scope],
+  );
+  return useCoverArt(refWithScope, displayCssPx, {
     surface: 'sparse',
   });
 }

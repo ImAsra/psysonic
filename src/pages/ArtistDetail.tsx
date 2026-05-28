@@ -1,5 +1,6 @@
 import { uploadArtistImage } from '../api/subsonicPlaylists';
 import { useCoverArt } from '../cover/useCoverArt';
+import { useArtistCoverRef } from '../cover/useLibraryCoverRef';
 import { setRating, star, unstar } from '../api/subsonicStarRating';
 import { getAlbum } from '../api/subsonicLibrary';
 import type { SubsonicArtist, SubsonicAlbum, SubsonicSong, SubsonicArtistInfo } from '../api/subsonicTypes';
@@ -44,6 +45,7 @@ import ArtistCard from '../components/nowPlaying/ArtistCard';
 import LosslessModeBanner from '../components/LosslessModeBanner';
 import { usePerfProbeFlags } from '../utils/perf/perfFlags';
 import { albumGridWarmCovers } from '../cover/layoutSizes';
+import { rememberAlbumDistinctDiscCovers } from '../cover/ref';
 import { VirtualCardGrid } from '../components/VirtualCardGrid';
 import { LOSSLESS_MODE_QUERY } from '../utils/library/losslessMode';
 import { sortArtistAlbumsByYear } from '../utils/library/sortArtistAlbums';
@@ -167,7 +169,10 @@ export default function ArtistDetail() {
 
   // Cover URLs — must run every render (before early returns) or hook order breaks.
   const coverId = artist ? (artist.coverArt || artist.id) : '';
-  const artistCoverFallback = useCoverArt(coverId || undefined, 80, { surface: 'sparse' });
+  const artistCoverRefResolved = useArtistCoverRef(artist?.id, artist?.coverArt, undefined, {
+    libraryResolve: true,
+  });
+  const artistCoverFallback = useCoverArt(artistCoverRefResolved, 80, { surface: 'sparse' });
 
   const groupedAlbums = useMemo(() => {
     if (albums.length === 0) return [];
@@ -209,6 +214,19 @@ export default function ArtistDetail() {
   useEffect(() => {
     setHeaderCoverFailed(false);
   }, [coverId, coverRevision, id]);
+
+  useEffect(() => {
+    const byAlbum = new Map<string, SubsonicSong[]>();
+    for (const song of topSongs) {
+      const albumId = song.albumId?.trim();
+      if (!albumId) continue;
+      if (!byAlbum.has(albumId)) byAlbum.set(albumId, []);
+      byAlbum.get(albumId)!.push(song);
+    }
+    for (const [albumId, songs] of byAlbum) {
+      rememberAlbumDistinctDiscCovers(albumId, songs);
+    }
+  }, [topSongs]);
 
   if (loading) {
     return (
@@ -284,6 +302,7 @@ export default function ArtistDetail() {
         openedLink={openedLink}
         openLink={openLink}
         coverId={coverId}
+        coverRef={artistCoverRefResolved}
         coverRevision={coverRevision}
         headerCoverFailed={headerCoverFailed}
         setHeaderCoverFailed={setHeaderCoverFailed}
@@ -313,6 +332,7 @@ export default function ArtistDetail() {
             <ArtistDetailTopTracks
               key="topTracks"
               topSongs={topSongs}
+              albums={albums}
               marginTop={sectionMt('topTracks')}
               playTopSongWithContinuation={playTopSongWithContinuation}
               losslessOnly={losslessOnly}
@@ -377,7 +397,10 @@ export default function ArtistDetail() {
                     wrapClassName="album-grid-wrap album-grid-wrap--artist"
                     warmGridCovers={albumGridWarmCovers()}
                     renderItem={a => (
-                      <AlbumCard album={a} linkQuery={losslessOnly ? LOSSLESS_MODE_QUERY : undefined} />
+                      <AlbumCard
+                        album={a}
+                        linkQuery={losslessOnly ? LOSSLESS_MODE_QUERY : undefined}
+                      />
                     )}
                   />
                 ) : groupedAlbums.map(([label, group]) => (
@@ -395,7 +418,10 @@ export default function ArtistDetail() {
                       wrapClassName="album-grid-wrap album-grid-wrap--artist"
                       warmGridCovers={albumGridWarmCovers()}
                       renderItem={a => (
-                      <AlbumCard album={a} linkQuery={losslessOnly ? LOSSLESS_MODE_QUERY : undefined} />
+                      <AlbumCard
+                        album={a}
+                        linkQuery={losslessOnly ? LOSSLESS_MODE_QUERY : undefined}
+                      />
                     )}
                     />
                   </div>

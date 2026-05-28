@@ -14,11 +14,12 @@ import { formatQueueBpmTech, formatQueueMoodLabels } from '../../utils/library/t
 import { useQueueTrackEnrichment } from '../../hooks/useQueueTrackEnrichment';
 import { QueueLufsTargetMenu } from './QueueLufsTargetMenu';
 import { PlaybackBufferingOverlay } from '../playback/PlaybackBufferingOverlay';
+import { CoverArtImage } from '../../cover/CoverArtImage';
+import { usePlaybackTrackCoverRef } from '../../cover/useLibraryCoverRef';
 import { usePlayerStore } from '../../store/playerStore';
 
 interface Props {
   currentTrack: Track;
-  currentCoverSrc: string;
   userRatingOverrides: Record<string, number>;
   orbitAttributionLabel: (trackId: string) => string | null;
   navigate: (to: string) => void | Promise<void>;
@@ -42,7 +43,7 @@ interface Props {
 }
 
 export function QueueCurrentTrack({
-  currentTrack, currentCoverSrc, userRatingOverrides, orbitAttributionLabel,
+  currentTrack, userRatingOverrides, orbitAttributionLabel,
   navigate, playbackSource, normalizationEngine, normalizationEngineLive,
   normalizationNowDb, normalizationTargetLufs, authLoudnessTargetLufs,
   loudnessPreAnalysisAttenuationDb, expandReplayGain, setExpandReplayGain,
@@ -50,6 +51,7 @@ export function QueueCurrentTrack({
   lufsTgtBtnRef, lufsTgtMenuRef, lufsTgtPopStyle, t,
 }: Props) {
   const showBufferingOverlay = usePlayerStore(s => s.isPlaybackBuffering);
+  const coverRef = usePlaybackTrackCoverRef(currentTrack);
   const enrichment = useQueueTrackEnrichment(currentTrack.id);
   const bpmTech = formatQueueBpmTech(enrichment, t);
   const moodLine = formatQueueMoodLabels(enrichment.moodLabels, t);
@@ -201,8 +203,15 @@ export function QueueCurrentTrack({
       })()}
       <div className="queue-current-track-body">
         <div className={`queue-current-cover${showBufferingOverlay ? ' playback-buffering' : ''}`}>
-          {currentTrack.coverArt && currentCoverSrc ? (
-            <img src={currentCoverSrc} alt="" loading="eager" />
+          {coverRef ? (
+            <CoverArtImage
+              coverRef={coverRef}
+              displayCssPx={128}
+              surface="sparse"
+              ensurePriority="high"
+              alt=""
+              loading="eager"
+            />
           ) : (
             <div className="fallback"><Music size={32} /></div>
           )}

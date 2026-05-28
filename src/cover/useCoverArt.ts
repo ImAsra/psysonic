@@ -3,22 +3,18 @@ import { coverEnsureQueued, coverEnsureRelease } from './ensureQueue';
 import { coverPeekQueued } from './peekQueue';
 import { getDiskSrcForGrid, seedGridDiskSrcCache } from './diskSrcLookup';
 import {
-  forgetDiskSrc,
-  getDiskSrc,
+  forgetDiskSrcPrefix,
   getDiskSrcCacheGeneration,
-  rememberDiskSrc,
   subscribeDiskSrcCache,
 } from './diskSrcCache';
 import { subscribeCoverDiskReady } from './diskHandoff';
-import { coverArtRef } from './ref';
 import { coverServerReachable } from './reachability';
-import { coverStorageKey } from './storageKeys';
+import { coverStorageKeyFromRef } from './storageKeys';
 import { resolveCoverDisplayTier } from './tiers';
 import type {
   CoverArtHandle,
-  CoverArtId,
+  CoverArtRef,
   CoverPrefetchPriority,
-  CoverServerScope,
   CoverSurfaceKind,
 } from './types';
 
@@ -26,73 +22,58 @@ import type {
  * Disk cache in Rust (WebP tiers) — no webview `getCoverArt` fetch when server is reachable.
  */
 export function useCoverArt(
-  coverArtId: CoverArtId | null | undefined,
+  coverRef: CoverArtRef | null | undefined,
   displayCssPx: number,
   opts?: {
-    serverScope?: CoverServerScope;
     surface?: CoverSurfaceKind;
     fullRes?: boolean;
     fetchQueueBias?: number;
     observeRootMargin?: string;
     alt?: string;
-    /** Download / ensure ordering — visible cells should pass `high`. */
     ensurePriority?: CoverPrefetchPriority;
   },
 ): CoverArtHandle {
-  const serverScope = opts?.serverScope ?? { kind: 'active' };
+  const ref = coverRef ?? null;
   const surface = opts?.surface ?? 'sparse';
-  const reachable = coverServerReachable(serverScope);
+  const reachable = ref ? coverServerReachable(ref.serverScope) : false;
 
   const tier = useMemo(
     () =>
-      coverArtId
+      ref
         ? resolveCoverDisplayTier(displayCssPx, {
             surface,
             fullRes: opts?.fullRes,
           })
         : 128,
-    [coverArtId, displayCssPx, surface, opts?.fullRes],
-  );
-
-  const ref = useMemo(
-    () => (coverArtId ? coverArtRef(coverArtId, serverScope) : null),
-    [coverArtId, serverScope],
+    [ref, displayCssPx, surface, opts?.fullRes],
   );
 
   const storageKey = useMemo(
-    () => (ref ? coverStorageKey(ref.serverScope, ref.coverArtId, tier) : ''),
+    () => (ref ? coverStorageKeyFromRef(ref, tier) : ''),
     [ref, tier],
   );
 
   const ensurePriority: CoverPrefetchPriority = opts?.ensurePriority ?? 'middle';
 
-  /** Dense grids: peek on mount; HTTP ensure only when IO marks the cell `high`. */
   const deferEnsureUntilVisible = surface === 'dense' && ensurePriority !== 'high';
 
   const readCachedSrc = useCallback(() => {
     if (!ref) return '';
-    if (surface === 'dense') {
-      return getDiskSrcForGrid(ref.serverScope, ref.coverArtId, tier);
-    }
-    return getDiskSrc(storageKey);
-  }, [ref, storageKey, surface, tier]);
+    return getDiskSrcForGrid(ref, tier);
+  }, [ref, tier]);
 
   useSyncExternalStore(subscribeDiskSrcCache, getDiskSrcCacheGeneration);
 
   const cachedSrc = readCachedSrc();
 
   const applyDiskPath = useCallback((path: string) => {
-    if (!ref || !storageKey) return;
+    if (!ref) return;
     if (!path) {
-      forgetDiskSrc(storageKey);
+      forgetDiskSrcPrefix(ref);
       return;
     }
-    if (surface === 'dense') {
-      seedGridDiskSrcCache(ref.serverScope, ref.coverArtId, tier, path);
-    } else {
-      rememberDiskSrc(storageKey, path);
-    }
-  }, [ref, storageKey, tier, surface, readCachedSrc]);
+    seedGridDiskSrcCache(ref, tier, path);
+  }, [ref, tier]);
 
   useEffect(() => {
     if (!ref || !storageKey) return;
@@ -139,8 +120,9 @@ export function useCoverArt(
   const provisional = Boolean(ref && storageKey && !src);
 
   const onImgError = useCallback(() => {
-    forgetDiskSrc(storageKey);
-    if (ref && reachable) {
+    if (!ref) return;
+    forgetDiskSrcPrefix(ref);
+    if (reachable) {
       void coverEnsureQueued(storageKey, ref, tier, 'high').then(result => {
         if (result.hit && result.path) applyDiskPath(result.path);
       });

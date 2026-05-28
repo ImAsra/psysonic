@@ -5,14 +5,15 @@ import type { SubsonicSong } from '../../api/subsonicTypes';
 import { usePlayerStore } from '../../store/playerStore';
 import { songToTrack } from '../../utils/playback/songToTrack';
 import { formatTrackTime } from '../../utils/format/formatDuration';
-import { CoverArtImage } from '../../cover/CoverArtImage';
+import { AlbumCoverArtImage } from '../../cover/AlbumCoverArtImage';
 import { COVER_DENSE_SEARCH_CSS_PX } from '../../cover/layoutSizes';
 import { AddToPlaylistSubmenu } from '../ContextMenu';
 
-function PlaylistSearchResultThumb({ coverArt }: { coverArt: string }) {
+function PlaylistSearchResultThumb({ albumId, coverArt }: { albumId: string; coverArt: string }) {
   return (
-    <CoverArtImage
-      coverArtId={coverArt}
+    <AlbumCoverArtImage
+      albumId={albumId}
+      coverArt={coverArt}
       displayCssPx={COVER_DENSE_SEARCH_CSS_PX}
       surface="dense"
       alt=""
@@ -133,7 +134,7 @@ export default function PlaylistSongSearchPanel({
                 return next;
               })}
             />
-            <PlaylistSearchResultThumb coverArt={song.coverArt ?? ''} />
+            <PlaylistSearchResultThumb albumId={song.albumId} coverArt={song.coverArt ?? ''} />
             <div className="playlist-search-info">
               <span className="playlist-search-title">{song.title}</span>
               <span className="playlist-search-artist">{song.artist} · <span className="playlist-search-album">{song.album}</span></span>

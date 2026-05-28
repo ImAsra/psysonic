@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Radio, Clock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useOrbitStore } from '../store/orbitStore';
-import { CoverArtImage } from '../cover/CoverArtImage';
+import { TrackCoverArtImage } from '../cover/TrackCoverArtImage';
 import OrbitQueueHead from './OrbitQueueHead';
 
 const ORBIT_QUEUE_COVER_LG_CSS_PX = 54;
@@ -78,8 +78,9 @@ export default function OrbitGuestQueue() {
           </div>
           <div className="orbit-guest-queue__current-body">
             {currentSong?.coverArt ? (
-              <CoverArtImage
-                coverArtId={currentSong.coverArt}
+              <TrackCoverArtImage
+                song={currentSong}
+                libraryResolve
                 displayCssPx={ORBIT_QUEUE_COVER_LG_CSS_PX}
                 surface="dense"
                 alt=""
@@ -115,8 +116,9 @@ export default function OrbitGuestQueue() {
             return (
               <div key={trackId} className="orbit-guest-queue__item orbit-guest-queue__item--pending">
                 {song?.coverArt ? (
-                  <CoverArtImage
-                    coverArtId={song.coverArt}
+                  <TrackCoverArtImage
+                    song={song}
+                    libraryResolve
                     displayCssPx={ORBIT_QUEUE_COVER_SM_CSS_PX}
                     surface="dense"
                     alt=""
@@ -154,8 +156,9 @@ export default function OrbitGuestQueue() {
               className="orbit-guest-queue__item"
             >
               {song?.coverArt ? (
-                <CoverArtImage
-                  coverArtId={song.coverArt}
+                <TrackCoverArtImage
+                  song={song}
+                  libraryResolve
                   displayCssPx={ORBIT_QUEUE_COVER_SM_CSS_PX}
                   surface="dense"
                   alt=""

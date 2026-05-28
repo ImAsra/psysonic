@@ -134,7 +134,12 @@ export default function SearchResults() {
           )}
 
           {results.albums.length > 0 && (
-            <AlbumRow title={t('search.albums')} albums={results.albums} />
+            <AlbumRow
+              title={t('search.albums')}
+              albums={results.albums}
+              windowArtworkByViewport
+              initialArtworkBudget={12}
+            />
           )}
 
           {results.songs.length > 0 && (

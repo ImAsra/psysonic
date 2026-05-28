@@ -650,6 +650,8 @@ export default function AdvancedSearch() {
               title={`${t('search.albums')} (${filteredResults.albums.length})`}
               albums={filteredResults.albums}
               albumLinkQuery={activeSearch?.losslessOnly ? LOSSLESS_MODE_QUERY : undefined}
+              windowArtworkByViewport
+              initialArtworkBudget={12}
             />
           )}
 

@@ -1,10 +1,12 @@
 import { getPlaybackServerId } from '../utils/playback/playbackServer';
 import { useAuthStore } from '../store/authStore';
+import { findServerByIdOrIndexKey } from '../utils/server/serverLookup';
 import {
+  resolveIndexKey,
   serverIndexKeyForProfile,
   serverIndexKeyFromUrl,
 } from '../utils/server/serverIndexKey';
-import type { CoverArtId, CoverArtRef, CoverArtTier, CoverServerScope } from './types';
+import type { CoverArtRef, CoverArtTier, CoverServerScope } from './types';
 
 /**
  * Stable server bucket for cover disk + IDB — same host index key as library SQLite (`server_id` column).
@@ -18,10 +20,9 @@ export function coverIndexKeyFromScope(scope: CoverServerScope): string {
     const playbackSid = getPlaybackServerId();
     const activeSid = useAuthStore.getState().activeServerId;
     const sid = playbackSid || activeSid;
-    const server = sid
-      ? useAuthStore.getState().servers.find(s => s.id === sid)
-      : undefined;
+    const server = sid ? findServerByIdOrIndexKey(sid) : undefined;
     if (server) return serverIndexKeyForProfile(server);
+    if (sid) return resolveIndexKey(sid) || sid;
     return '_';
   }
   const server = useAuthStore.getState().getActiveServer();
@@ -38,8 +39,12 @@ export const serverIdFromScope = coverIndexKeyFromScope;
 
 export function coverStorageKey(
   serverScope: CoverServerScope,
-  coverArtId: CoverArtId,
+  ref: Pick<CoverArtRef, 'cacheKind' | 'cacheEntityId'>,
   tier: CoverArtTier,
 ): string {
-  return `${coverIndexKeyFromScope(serverScope)}:cover:${coverArtId}:${tier}`;
+  return `${coverIndexKeyFromScope(serverScope)}:cover:${ref.cacheKind}:${ref.cacheEntityId}:${tier}`;
+}
+
+export function coverStorageKeyFromRef(ref: CoverArtRef, tier: CoverArtTier): string {
+  return coverStorageKey(ref.serverScope, ref, tier);
 }

@@ -1,5 +1,6 @@
 import md5 from 'md5';
-import { coverStorageKey } from '../cover/storageKeys';
+import { coverStorageKey, coverStorageKeyFromRef } from '../cover/storageKeys';
+import { coverEntryToRef, resolveAlbumCoverEntry } from '../cover/resolveEntry';
 import type { CoverArtTier } from '../cover/types';
 import { useAuthStore } from '../store/authStore';
 import { findServerByIdOrIndexKey } from '../utils/server/serverLookup';
@@ -57,14 +58,18 @@ export function buildStreamUrl(id: string): string {
 
 /** @deprecated Use `coverStorageKey` from `src/cover/storageKeys` — shim until migration. */
 export function coverArtCacheKey(id: string, size = 256): string {
-  return coverStorageKey({ kind: 'active' }, id, size as CoverArtTier);
+  const entry = resolveAlbumCoverEntry(id, id);
+  const ref = coverEntryToRef(entry ?? { cacheKind: 'album', cacheEntityId: id, fetchCoverArtId: id });
+  return coverStorageKeyFromRef(ref, size as CoverArtTier);
 }
 
 /** @deprecated Use `coverStorageKey` from `src/cover/storageKeys` — shim until migration. */
 export function coverArtCacheKeyForServer(serverIdOrKey: string, id: string, size = 256): string {
   const server = findServerByIdOrIndexKey(serverIdOrKey);
-  if (!server) return `${serverIdOrKey}:cover:${id}:${size}`;
-  return coverStorageKey(
+  if (!server) return `${serverIdOrKey}:cover:album:${id}:${size}`;
+  const entry = resolveAlbumCoverEntry(id, id);
+  const ref = coverEntryToRef(
+    entry ?? { cacheKind: 'album', cacheEntityId: id, fetchCoverArtId: id },
     {
       kind: 'server',
       serverId: server.id,
@@ -72,9 +77,8 @@ export function coverArtCacheKeyForServer(serverIdOrKey: string, id: string, siz
       username: server.username,
       password: server.password,
     },
-    id,
-    size as CoverArtTier,
   );
+  return coverStorageKeyFromRef(ref, size as CoverArtTier);
 }
 
 /** @deprecated Use `buildCoverArtFetchUrl` from `src/cover/fetchUrl` — shim until migration. */

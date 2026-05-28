@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { albumCoverRef } from './ref';
 
 vi.mock('./diskSrcCache', () => ({
   rememberDiskSrc: vi.fn(() => 'asset://cover.webp'),
@@ -12,7 +13,7 @@ vi.mock('./diskHandoff', () => ({
 
 import { rememberDiskSrc } from './diskSrcCache';
 import { notifyCoverDiskReady } from './diskHandoff';
-import { gridDiskSrcLookupOrder, rememberGridDiskSrc } from './diskSrcLookup';
+import { gridDiskSrcLookupOrder, rememberDiskSrcLadder, rememberGridDiskSrc } from './diskSrcLookup';
 
 describe('gridDiskSrcLookupOrder', () => {
   it('prefers 800 right after 512 when 512 is wanted', () => {
@@ -32,9 +33,25 @@ describe('rememberGridDiskSrc', () => {
   });
 
   it('seeds 512 and 800 keys from one on-disk path (800.webp fallback)', () => {
-    const hit = rememberGridDiskSrc({ kind: 'active' }, 'al-1', 512, '/data/800.webp');
+    const ref = albumCoverRef('al-1', 'al-1');
+    const hit = rememberGridDiskSrc(ref, 512, '/data/800.webp');
     expect(hit).toBe(true);
     expect(vi.mocked(rememberDiskSrc).mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(vi.mocked(notifyCoverDiskReady)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('rememberDiskSrcLadder', () => {
+  beforeEach(() => {
+    vi.mocked(rememberDiskSrc).mockClear();
+    vi.mocked(rememberDiskSrc).mockReturnValue('asset://x');
+  });
+
+  it('seeds 128 when only 800.webp path arrives', () => {
+    const hit = rememberDiskSrcLadder('srv', { cacheKind: 'album', cacheEntityId: 'al-1' }, 128, '/data/800.webp');
+    expect(hit).toBe(true);
+    const keys = vi.mocked(rememberDiskSrc).mock.calls.map(c => c[0]);
+    expect(keys).toContain('srv:cover:album:al-1:128');
+    expect(keys).toContain('srv:cover:album:al-1:800');
   });
 });

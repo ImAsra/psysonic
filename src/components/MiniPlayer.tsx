@@ -1,4 +1,5 @@
 import { usePlaybackCoverArt } from '../hooks/usePlaybackCoverArt';
+import { usePlaybackTrackCoverRef } from '../cover/useLibraryCoverRef';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { emit } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
@@ -140,7 +141,8 @@ export default function MiniPlayer() {
   }, [queueOpen, state.queueIndex]);
 
   const { track, isPlaying } = state;
-  const { src: miniCoverSrc, cacheKey: miniCoverKey } = usePlaybackCoverArt(track?.coverArt, 300);
+  const miniCoverRef = usePlaybackTrackCoverRef(track ?? undefined);
+  const { src: miniCoverSrc, cacheKey: miniCoverKey } = usePlaybackCoverArt(miniCoverRef, 300);
   const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
   return (

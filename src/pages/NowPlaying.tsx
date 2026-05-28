@@ -1,5 +1,6 @@
-import { usePlaybackCoverArt } from '../hooks/usePlaybackCoverArt';
 import { useCoverArt } from '../cover/useCoverArt';
+import { albumCoverRef } from '../cover/ref';
+import { usePlaybackTrackCoverRef } from '../cover/useLibraryCoverRef';
 import { coverArtIdFromRadio } from '../cover/ids';
 import type { SubsonicArtistInfo, SubsonicSong } from '../api/subsonicTypes';
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
@@ -95,11 +96,14 @@ export default function NowPlaying() {
     showLyrics();
   }, [isQueueVisible, toggleQueue, showLyrics]);
 
-  const trackCover = usePlaybackCoverArt(currentTrack?.coverArt, 800);
-  const resolvedCover = trackCover.src;
+  const playbackCoverRef = usePlaybackTrackCoverRef(currentTrack ?? undefined);
 
   const radioCoverArtId = currentRadio?.coverArt ? coverArtIdFromRadio(currentRadio.id) : undefined;
-  const radioCover = useCoverArt(radioCoverArtId, 800, { surface: 'sparse' });
+  const radioCover = useCoverArt(
+    radioCoverArtId ? albumCoverRef(radioCoverArtId, radioCoverArtId) : null,
+    800,
+    { surface: 'sparse' },
+  );
   const resolvedRadioCover = radioCover.src;
 
   const contributorRows = useMemo(
@@ -242,7 +246,7 @@ export default function NowPlaying() {
               lfmLoved={lfmLoved}
               lfmLoveEnabled={lfmLoveEnabled}
               activeLyricsTab={activeTab === 'lyrics' && isQueueVisible}
-              coverUrl={resolvedCover}
+              coverRef={playbackCoverRef}
               onNavigate={stableNavigate}
               onToggleStar={toggleStar}
               onToggleLfmLove={toggleLfmLove}

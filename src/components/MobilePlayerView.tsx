@@ -1,5 +1,6 @@
 import { queueSongStar } from '../store/pendingStarSync';
 import { usePlaybackCoverArt } from '../hooks/usePlaybackCoverArt';
+import { usePlaybackTrackCoverRef } from '../cover/useLibraryCoverRef';
 import type { Track } from '../store/playerStoreTypes';
 import { getPlaybackProgressSnapshot, subscribePlaybackProgress } from '../store/playbackProgress';
 import React, { useState, useCallback, useMemo, useRef, useEffect, useSyncExternalStore, CSSProperties } from 'react';
@@ -223,7 +224,8 @@ export default function MobilePlayerView() {
 
   const duration = currentTrack?.duration ?? 0;
 
-  const { src: coverFetchUrl, cacheKey: coverKey } = usePlaybackCoverArt(currentTrack?.coverArt, 800);
+  const playbackCoverRef = usePlaybackTrackCoverRef(currentTrack ?? undefined);
+  const { src: coverFetchUrl, cacheKey: coverKey } = usePlaybackCoverArt(playbackCoverRef, 800);
   const resolvedCover = useCachedUrl(coverFetchUrl, coverKey);
 
   // Dynamic background color extracted from cover art

@@ -6,6 +6,9 @@ import type { PlayerState, Track } from '../../store/playerStoreTypes';
 import type { RadioMetadata } from '../../hooks/useRadioMetadata';
 import type { PreviewingTrack } from '../../store/previewStore';
 import { CoverArtImage } from '../../cover/CoverArtImage';
+import { albumCoverRef } from '../../cover/ref';
+import { useAlbumCoverRef } from '../../cover/useLibraryCoverRef';
+import { usePlaybackTrackCoverRef } from '../../cover/useLibraryCoverRef';
 import LastfmIcon from '../LastfmIcon';
 import MarqueeText from '../MarqueeText';
 import { OpenArtistRefInline } from '../OpenArtistRefInline';
@@ -24,7 +27,6 @@ interface Props {
   radioMeta: RadioMetadata;
   radioCoverArtId?: string;
   coverArtId?: string;
-  displayCoverArt: string | undefined;
   displayTitle: string;
   displayArtist: string;
   /** When set (OpenSubsonic `artists` on the playing track), render split links like album track rows. */
@@ -45,13 +47,20 @@ interface Props {
 
 export function PlayerTrackInfo({
   currentTrack, currentRadio, isRadio, radioMeta, radioCoverArtId,
-  coverArtId, displayCoverArt, displayTitle, displayArtist, displayArtistRefs,
+  coverArtId, displayTitle, displayArtist, displayArtistRefs,
   showPreviewMeta, previewingTrack, isStarred, toggleStar,
   lastfmSessionKey, lastfmLoved, toggleLastfmLove,
   userRatingOverrides, toggleFullscreen,
   navigate, openContextMenu, t,
 }: Props) {
   const showBufferingOverlay = usePlayerStore(s => s.isPlaybackBuffering);
+  const playbackCoverRef = usePlaybackTrackCoverRef(
+    showPreviewMeta ? null : currentTrack ?? undefined,
+  );
+  const previewCoverRef = useAlbumCoverRef(
+    showPreviewMeta ? coverArtId : null,
+    showPreviewMeta ? coverArtId : null,
+  );
   const layoutItems = usePlayerBarLayoutStore(s => s.items);
   const isLayoutVisible = (id: PlayerBarLayoutItemId) =>
     layoutItems.find(i => i.id === id)?.visible !== false;
@@ -64,10 +73,10 @@ export function PlayerTrackInfo({
         data-tooltip={!isRadio && !showPreviewMeta && currentTrack ? t('player.openFullscreen') : undefined}
       >
         {isRadio ? (
-          radioCoverArtId ? (
+          radioCoverArtId && currentRadio ? (
             <CoverArtImage
               className="player-album-art"
-              coverArtId={radioCoverArtId}
+              coverRef={albumCoverRef(radioCoverArtId, radioCoverArtId)}
               displayCssPx={128}
               surface="sparse"
               alt={currentRadio?.name ?? ''}
@@ -77,13 +86,13 @@ export function PlayerTrackInfo({
               <Cast size={20} />
             </div>
           )
-        ) : coverArtId ? (
+        ) : !isRadio && (showPreviewMeta ? coverArtId : playbackCoverRef) ? (
           <CoverArtImage
             className="player-album-art"
-            coverArtId={coverArtId}
+            coverRef={showPreviewMeta ? previewCoverRef! : playbackCoverRef!}
             displayCssPx={128}
             surface="sparse"
-            serverScope={showPreviewMeta ? { kind: 'active' } : { kind: 'playback' }}
+            ensurePriority="high"
             alt={showPreviewMeta ? `${previewingTrack!.title} Cover` : `${currentTrack?.album ?? ''} Cover`}
           />
           ) : (

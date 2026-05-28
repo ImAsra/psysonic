@@ -1,11 +1,13 @@
 import { useEffect } from 'react';
 import { coverCacheEnsure, coverCachePeekBatch } from '../api/coverCache';
-import { coverArtRef, resolvePlaybackCoverScope } from '../cover/ref';
+import { albumCoverRef } from '../cover/ref';
+import { resolvePlaybackCoverScope } from '../cover/ref';
+import { resolveTrackCoverRefFromLibrary } from '../cover/resolveEntryLibrary';
 import { getDiskSrc, rememberDiskSrc } from '../cover/diskSrcCache';
-import { coverIndexKeyFromRef, coverStorageKey } from '../cover/storageKeys';
+import { coverStorageKeyFromRef } from '../cover/storageKeys';
 import { resolveCoverDisplayTier } from '../cover/tiers';
 import { coverArtIdFromRadio } from '../cover/ids';
-import type { CoverServerScope } from '../cover/types';
+import type { CoverArtRef } from '../cover/types';
 import { prewarmNowPlayingFetchers } from './useNowPlayingFetchers';
 import { useAuthStore } from '../store/authStore';
 import { usePlayerStore } from '../store/playerStore';
@@ -13,23 +15,13 @@ import { usePlaybackServerId } from './usePlaybackServerId';
 
 const NOW_PLAYING_COVER_CSS_PX = 800;
 
-async function prewarmCoverForScope(
-  coverArtId: string,
-  scope: CoverServerScope,
-): Promise<void> {
-  if (!coverArtId) return;
+async function prewarmCoverRef(ref: CoverArtRef): Promise<void> {
+  if (!ref.fetchCoverArtId) return;
   const tier = resolveCoverDisplayTier(NOW_PLAYING_COVER_CSS_PX, { surface: 'sparse' });
-  const ref = coverArtRef(coverArtId, scope);
-  const storageKey = coverStorageKey(ref.serverScope, ref.coverArtId, tier);
+  const storageKey = coverStorageKeyFromRef(ref, tier);
   if (getDiskSrc(storageKey)) return;
 
-  const hits = await coverCachePeekBatch([
-    {
-      serverIndexKey: coverIndexKeyFromRef(ref),
-      coverArtId: ref.coverArtId,
-      tier,
-    },
-  ]);
+  const hits = await coverCachePeekBatch([ref], tier);
   const hitPath = hits[storageKey];
   if (hitPath) {
     rememberDiskSrc(storageKey, hitPath);
@@ -73,8 +65,18 @@ export function useNowPlayingPrewarm(): void {
       fetchEnabled: true,
     });
 
-    if (currentTrack.coverArt) {
-      void prewarmCoverForScope(currentTrack.coverArt, resolvePlaybackCoverScope());
+    if (currentTrack.albumId && currentTrack.id) {
+      void resolveTrackCoverRefFromLibrary(
+        {
+          id: currentTrack.id,
+          albumId: currentTrack.albumId,
+          coverArt: currentTrack.coverArt,
+          discNumber: (currentTrack as { discNumber?: number }).discNumber,
+        },
+        resolvePlaybackCoverScope(),
+      ).then(ref => {
+        if (ref) void prewarmCoverRef(ref);
+      });
     }
   }, [
     currentTrack?.id,
@@ -91,6 +93,6 @@ export function useNowPlayingPrewarm(): void {
   useEffect(() => {
     if (!currentRadio?.coverArt || !activeServerId) return;
     const radioCoverArtId = coverArtIdFromRadio(currentRadio.id);
-    void prewarmCoverForScope(radioCoverArtId, { kind: 'active' });
+    void prewarmCoverRef(albumCoverRef(radioCoverArtId, radioCoverArtId, { kind: 'active' }));
   }, [currentRadio?.id, currentRadio?.coverArt, activeServerId]);
 }

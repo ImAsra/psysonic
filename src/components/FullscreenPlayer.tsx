@@ -1,6 +1,7 @@
 import { queueSongStar } from '../store/pendingStarSync';
 import { usePlaybackCoverArt } from '../hooks/usePlaybackCoverArt';
-import { playbackCoverArtForId } from '../utils/playback/playbackServer';
+import { usePlaybackTrackCoverRef } from '../cover/useLibraryCoverRef';
+import { playbackCoverArtForAlbum } from '../utils/playback/playbackServer';
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import {
   SkipBack, SkipForward,
@@ -50,11 +51,12 @@ export default function FullscreenPlayer({ onClose }: FullscreenPlayerProps) {
 
   const duration = currentTrack?.duration ?? 0;
 
-  // 300px for the small art box; 500px for the right-side portrait fallback.
-  const artCover = usePlaybackCoverArt(currentTrack?.coverArt, 300);
+  const playbackCoverRef = usePlaybackTrackCoverRef(currentTrack ?? undefined);
+
+  const artCover = usePlaybackCoverArt(playbackCoverRef, 300);
   const artUrl = artCover.src;
   const artKey = artCover.cacheKey;
-  const portraitCover = usePlaybackCoverArt(currentTrack?.coverArt, 500);
+  const portraitCover = usePlaybackCoverArt(playbackCoverRef, 500);
   const coverUrl = portraitCover.src;
   const coverKey = portraitCover.cacheKey;
   // `false` = no fetchUrl fallback — prevents double crossfade (fetchUrl → blobUrl).
@@ -79,14 +81,17 @@ export default function FullscreenPlayer({ onClose }: FullscreenPlayerProps) {
   // around the current index keeps it warm).
   const queueIndex = usePlayerStore(s => s.queueIndex);
   const nextTrack = useQueueTrackAt(queueIndex + 1);
-  const nextCoverArt = queueIndex >= 0 ? (nextTrack?.coverArt ?? null) : null;
   const queueServerId = usePlayerStore(s => s.queueServerId);
   const activeServerId = useAuthStore(s => s.activeServerId);
   useEffect(() => {
-    if (!nextCoverArt) return;
-    const { src: url, cacheKey: key } = playbackCoverArtForId(nextCoverArt, 300);
+    if (!nextTrack?.albumId || !nextTrack.coverArt) return;
+    const { src: url, cacheKey: key } = playbackCoverArtForAlbum(
+      nextTrack.albumId,
+      nextTrack.coverArt,
+      300,
+    );
     getCachedBlob(url, key).catch(() => {});
-  }, [nextCoverArt, queueServerId, activeServerId]);
+  }, [nextTrack?.albumId, nextTrack?.coverArt, queueServerId, activeServerId]);
 
   // Lyrics settings popover state
   const [lyricsMenuOpen, setLyricsMenuOpen] = useState(false);

@@ -11,7 +11,8 @@ import OverlayScrollArea from '../OverlayScrollArea';
 import { usePlayerStore } from '../../store/playerStore';
 import { CoverArtImage } from '../../cover/CoverArtImage';
 import { COVER_DENSE_SEARCH_CSS_PX } from '../../cover/layoutSizes';
-import type { CoverServerScope } from '../../cover/types';
+import { COVER_SCOPE_ACTIVE, type CoverServerScope } from '../../cover/types';
+import { AlbumCoverArtImage } from '../../cover/AlbumCoverArtImage';
 
 type ShareQueuePreviewModalProps = {
   open: boolean;
@@ -36,7 +37,7 @@ function shareCoverServerScope(coverServer?: ServerProfile | null): CoverServerS
       password: coverServer.password,
     };
   }
-  return { kind: 'active' };
+  return COVER_SCOPE_ACTIVE;
 }
 
 function QueuePreviewTrackRow({
@@ -51,11 +52,12 @@ function QueuePreviewTrackRow({
   return (
     <li className="share-queue-preview-track">
       {song.coverArt ? (
-        <CoverArtImage
-          coverArtId={coverId}
+        <AlbumCoverArtImage
+          albumId={song.albumId ?? coverId}
+          coverArt={song.coverArt}
+          serverScope={shareCoverServerScope(coverServer)}
           displayCssPx={COVER_DENSE_SEARCH_CSS_PX}
           surface="dense"
-          serverScope={shareCoverServerScope(coverServer)}
           className="share-queue-preview-track__thumb"
           alt=""
         />

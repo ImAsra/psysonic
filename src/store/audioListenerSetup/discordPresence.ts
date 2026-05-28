@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import { coverArtRef, resolvePlaybackCoverScope } from '../../cover/ref';
+import { resolvePlaybackCoverScope } from '../../cover/ref';
+import { resolveTrackCoverRefFromLibrary } from '../../cover/resolveEntryLibrary';
 import { coverArtUrlForDiscord } from '../../cover/integrations/discord';
 import { useAuthStore } from '../authStore';
 import { usePlayerStore } from '../playerStore';
@@ -82,13 +83,28 @@ export function setupDiscordPresence(): () => void {
       if (cached !== undefined) {
         sendPresence(cached);
       } else {
-        const ref = coverArtRef(currentTrack.coverArt, resolvePlaybackCoverScope());
-        coverArtUrlForDiscord(ref).then(url => {
-          discordServerCoverCache.set(cacheKey, url);
-          sendPresence(url);
-        }).catch(() => {
-          discordServerCoverCache.set(cacheKey, null);
-          sendPresence(null);
+        void resolveTrackCoverRefFromLibrary(
+          {
+            id: currentTrack.id,
+            albumId: currentTrack.albumId,
+            coverArt: currentTrack.coverArt,
+            discNumber: (currentTrack as { discNumber?: number }).discNumber,
+          },
+          resolvePlaybackCoverScope(),
+        ).then(ref => {
+          if (!ref) {
+            sendPresence(null);
+            return;
+          }
+          return coverArtUrlForDiscord(ref)
+            .then(url => {
+              discordServerCoverCache.set(cacheKey, url);
+              sendPresence(url);
+            })
+            .catch(() => {
+              discordServerCoverCache.set(cacheKey, null);
+              sendPresence(null);
+            });
         });
       }
     } else {

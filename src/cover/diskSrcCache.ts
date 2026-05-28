@@ -1,4 +1,6 @@
 import { convertFileSrc, isTauri } from '@tauri-apps/api/core';
+import { coverIndexKeyFromScope } from './storageKeys';
+import type { CoverServerScope } from './types';
 
 /** Stable asset URLs for disk `.webp` tiers — survives route unmount. */
 const diskSrcByStorageKey = new Map<string, string>();
@@ -27,23 +29,60 @@ export function getDiskSrcCacheGeneration(): number {
   return cacheGeneration;
 }
 
+function isAssetProtocolUrl(url: string): boolean {
+  return url.startsWith('asset:') || /^https?:\/\/asset\.localhost/i.test(url);
+}
+
+/** Windows: forward slashes before `convertFileSrc` (tauri#7970). */
+function normalizePathForConvert(fsPath: string): string {
+  if (/^[a-zA-Z]:[\\/]/.test(fsPath)) {
+    return fsPath.replace(/\\/g, '/');
+  }
+  return fsPath;
+}
+
 /** True when `convertFileSrc` failed and returned the filesystem path unchanged. */
 function isRawFsPath(url: string, fsPath: string): boolean {
-  return url === fsPath || (url.startsWith('/') && fsPath.startsWith('/'));
+  if (url === fsPath) return true;
+  if (url.startsWith('/') && fsPath.startsWith('/')) return true;
+  if (/^[a-zA-Z]:[\\/]/.test(fsPath)) {
+    const norm = fsPath.replace(/\\/g, '/');
+    const urlNorm = url.replace(/\\/g, '/');
+    // `endsWith(norm)`: convertFileSrc passthrough; `norm.endsWith(urlNorm)`: partial URL match.
+    if (urlNorm === norm || urlNorm.endsWith(norm) || norm.endsWith(urlNorm)) {
+      return !isAssetProtocolUrl(url);
+    }
+  }
+  return false;
 }
 
 /**
  * Turn a Rust disk path into a webview-loadable URL.
  * Returns empty when not in Tauri or path is outside asset scope (never put raw paths in `<img src>`).
  */
+function tryCoverDiskUrl(fsPath: string): string {
+  const paths = fsPath.includes('\\')
+    ? [normalizePathForConvert(fsPath), fsPath]
+    : [fsPath, normalizePathForConvert(fsPath)];
+  const seen = new Set<string>();
+  for (const p of paths) {
+    if (!p || seen.has(p)) continue;
+    seen.add(p);
+    const src = convertFileSrc(p);
+    if (!src || isRawFsPath(src, p) || isRawFsPath(src, fsPath)) continue;
+    return src;
+  }
+  return '';
+}
+
 export function coverDiskUrl(fsPath: string): string {
   if (!fsPath || !isTauri()) return '';
-  const src = convertFileSrc(fsPath);
-  if (isRawFsPath(src, fsPath)) {
-    if (import.meta.env.DEV) {
-      console.warn('[cover] convertFileSrc out of asset scope — check tauri.conf assetProtocol', fsPath);
-    }
-    return '';
+  const src = tryCoverDiskUrl(fsPath);
+  if (!src && import.meta.env.DEV) {
+    console.warn('[cover] convertFileSrc out of asset scope — check tauri.conf assetProtocol', {
+      fsPath,
+      src: convertFileSrc(normalizePathForConvert(fsPath)),
+    });
   }
   return src;
 }
@@ -67,8 +106,13 @@ export function forgetDiskSrc(storageKey: string): void {
   if (diskSrcByStorageKey.delete(storageKey)) bumpDiskSrcCache();
 }
 
-export function forgetDiskSrcPrefix(serverIndexKey: string, coverArtId: string): void {
-  const prefix = `${serverIndexKey}:cover:${coverArtId}:`;
+export function forgetDiskSrcPrefix(ref: {
+  serverScope: CoverServerScope;
+  cacheKind: string;
+  cacheEntityId: string;
+}): void {
+  const serverIndexKey = coverIndexKeyFromScope(ref.serverScope);
+  const prefix = `${serverIndexKey}:cover:${ref.cacheKind}:${ref.cacheEntityId}:`;
   let changed = false;
   for (const key of diskSrcByStorageKey.keys()) {
     if (key.startsWith(prefix)) {

@@ -9,10 +9,10 @@ import { activateShareSearchServer } from '../../utils/share/enqueueShareSearchP
 import { sharePayloadTotal, type ShareSearchMatch } from '../../utils/share/shareSearch';
 import type { ShareSearchPreviewState } from '../../hooks/useShareSearchPreview';
 import { FETCH_QUEUE_BIAS_SEARCH_ARTIST_OVER_ALBUM } from '../CachedImage';
-import { CoverArtImage } from '../../cover/CoverArtImage';
+import { AlbumCoverArtImage } from '../../cover/AlbumCoverArtImage';
+import { ArtistCoverArtImage } from '../../cover/ArtistCoverArtImage';
 import { COVER_DENSE_SEARCH_CSS_PX } from '../../cover/layoutSizes';
-import { coverArtIdFromArtist } from '../../cover/ids';
-import type { CoverServerScope } from '../../cover/types';
+import { COVER_SCOPE_ACTIVE, type CoverServerScope } from '../../cover/types';
 import { useShareQueuePreview } from '../../hooks/useShareQueuePreview';
 import ShareQueuePreviewModal from './ShareQueuePreviewModal';
 
@@ -42,25 +42,28 @@ function shareCoverServerScope(coverServer?: ServerProfile | null): CoverServerS
       password: coverServer.password,
     };
   }
-  return { kind: 'active' };
+  return COVER_SCOPE_ACTIVE;
 }
 
 function ShareAlbumThumb({
+  albumId,
   coverArt,
   displayCssPx,
   coverServer,
 }: {
+  albumId: string;
   coverArt: string;
   displayCssPx: number;
   coverServer?: ServerProfile | null;
 }) {
   const cls = displayCssPx >= 64 ? 'mobile-search-thumb' : 'search-result-thumb';
   return (
-    <CoverArtImage
-      coverArtId={coverArt}
+    <AlbumCoverArtImage
+      albumId={albumId}
+      coverArt={coverArt}
+      serverScope={shareCoverServerScope(coverServer)}
       displayCssPx={displayCssPx}
       surface="dense"
-      serverScope={shareCoverServerScope(coverServer)}
       className={cls}
       alt=""
     />
@@ -77,8 +80,7 @@ function ShareArtistThumb({
   coverServer?: ServerProfile | null;
 }) {
   const [failed, setFailed] = useState(false);
-  const coverId = coverArtIdFromArtist(artist);
-  useEffect(() => { setFailed(false); }, [coverId]);
+  useEffect(() => { setFailed(false); }, [artist.id, artist.coverArt]);
 
   if (failed) {
     if (displayCssPx >= 64) {
@@ -100,11 +102,12 @@ function ShareArtistThumb({
       ? 'mobile-search-thumb mobile-search-thumb--artist-round'
       : 'search-result-thumb';
   return (
-    <CoverArtImage
-      coverArtId={coverId}
+    <ArtistCoverArtImage
+      artistId={artist.id}
+      coverArt={artist.coverArt}
+      serverScope={shareCoverServerScope(coverServer)}
       displayCssPx={displayCssPx}
       surface="dense"
-      serverScope={shareCoverServerScope(coverServer)}
       className={cls}
       alt=""
       loading="eager"
@@ -319,7 +322,7 @@ export default function ShareSearchResults(props: ShareSearchResultsProps) {
           aria-selected={desktop ? activeIndex === 0 : undefined}
         >
           {shareAlbum.coverArt ? (
-            <ShareAlbumThumb coverArt={shareAlbum.coverArt} displayCssPx={thumbDisplayCssPx} coverServer={shareCoverServer} />
+            <ShareAlbumThumb albumId={shareAlbum.id} coverArt={shareAlbum.coverArt} displayCssPx={thumbDisplayCssPx} coverServer={shareCoverServer} />
           ) : (
             <StaticIcon className={iconCls}><Disc3 size={desktop ? 14 : 20} /></StaticIcon>
           )}
@@ -370,7 +373,7 @@ export default function ShareSearchResults(props: ShareSearchResultsProps) {
           aria-selected={desktop ? activeIndex === 0 : undefined}
         >
           {shareTrackSong.coverArt ? (
-            <ShareAlbumThumb coverArt={shareTrackSong.coverArt} displayCssPx={thumbDisplayCssPx} coverServer={shareCoverServer} />
+            <ShareAlbumThumb albumId={shareTrackSong.albumId} coverArt={shareTrackSong.coverArt} displayCssPx={thumbDisplayCssPx} coverServer={shareCoverServer} />
           ) : (
             <StaticIcon className={iconCls}><Music size={desktop ? 14 : 20} /></StaticIcon>
           )}

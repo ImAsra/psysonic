@@ -5,6 +5,7 @@ import { useOfflineStore, type OfflineAlbumMeta } from '../store/offlineStore';
 import { useAuthStore } from '../store/authStore';
 import { usePlayerStore } from '../store/playerStore';
 import { CoverArtImage } from '../cover/CoverArtImage';
+import { AlbumCoverArtImage } from '../cover/AlbumCoverArtImage';
 import { usePerfProbeFlags } from '../utils/perf/perfFlags';
 import { albumGridWarmCovers } from '../cover/layoutSizes';
 import { VirtualCardGrid } from '../components/VirtualCardGrid';
@@ -82,11 +83,12 @@ export default function OfflineLibrary() {
     return (
       <div className="album-card card offline-library-card">
         <div className="album-card-cover">
-          {coverScope && album.coverArt ? (
-            <CoverArtImage
-              coverArtId={album.coverArt}
-              displayCssPx={OFFLINE_CARD_COVER_CSS_PX}
+          {coverScope ? (
+            <AlbumCoverArtImage
+              albumId={album.id}
+              coverArt={album.coverArt}
               serverScope={coverScope}
+              displayCssPx={OFFLINE_CARD_COVER_CSS_PX}
               surface="dense"
               alt={`${album.name} Cover`}
               loading="lazy"

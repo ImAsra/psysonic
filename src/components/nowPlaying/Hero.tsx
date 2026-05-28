@@ -1,6 +1,8 @@
 import React, { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Headphones, Heart, MicVocal, Music, Star } from 'lucide-react';
+import { CoverArtImage } from '../../cover/CoverArtImage';
+import type { CoverArtRef } from '../../cover/types';
 import type { LastfmArtistStats, LastfmTrackInfo } from '../../api/lastfm';
 import LastfmIcon from '../LastfmIcon';
 import { formatTrackTime } from '../../utils/format/formatDuration';
@@ -19,7 +21,7 @@ interface HeroProps {
   lfmLoved: boolean;
   lfmLoveEnabled: boolean;
   activeLyricsTab: boolean;
-  coverUrl: string;
+  coverRef?: CoverArtRef;
   onNavigate: (path: string) => void;
   onToggleStar: () => void;
   onToggleLfmLove: () => void;
@@ -40,7 +42,7 @@ function renderStars(rating?: number) {
   );
 }
 
-const Hero = memo(function Hero({ track, genre, playCount, userRatingOverride, lfmTrack, lfmArtist, starred, lfmLoved, lfmLoveEnabled, activeLyricsTab, coverUrl, onNavigate, onToggleStar, onToggleLfmLove, onOpenLyrics }: HeroProps) {
+const Hero = memo(function Hero({ track, genre, playCount, userRatingOverride, lfmTrack, lfmArtist, starred, lfmLoved, lfmLoveEnabled, activeLyricsTab, coverRef, onNavigate, onToggleStar, onToggleLfmLove, onOpenLyrics }: HeroProps) {
   const { t } = useTranslation();
   const rating = userRatingOverride ?? track.userRating;
   const hiRes  = (track.bitDepth ?? 0) > 16 || (track.samplingRate ?? 0) > 48000;
@@ -49,9 +51,18 @@ const Hero = memo(function Hero({ track, genre, playCount, userRatingOverride, l
   return (
     <div className="np-dash-hero">
       <div className="np-dash-hero-cover">
-        {coverUrl
-          ? <img src={coverUrl} alt="" className="np-cover" />
-          : <div className="np-cover np-cover-fallback"><Music size={64} /></div>}
+        {coverRef ? (
+          <CoverArtImage
+            className="np-cover"
+            coverRef={coverRef}
+            displayCssPx={280}
+            surface="sparse"
+            ensurePriority="high"
+            alt=""
+          />
+        ) : (
+          <div className="np-cover np-cover-fallback"><Music size={64} /></div>
+        )}
       </div>
       <div className="np-dash-hero-body">
         <div className="np-dash-hero-title">{track.title}</div>
