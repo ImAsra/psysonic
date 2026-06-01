@@ -21,7 +21,7 @@ import {
   logLibrarySearch,
 } from '../utils/library/libraryDevLog';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useNavigateToAlbum } from '../hooks/useNavigateToAlbum';
 import { Search, Disc3, Users, Music, TextSearch, Database, Globe } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
@@ -38,6 +38,19 @@ import { albumCoverRefForSong } from '../cover/ref';
 import { showToast } from '../utils/ui/toast';
 import { useShareSearch } from '../hooks/useShareSearch';
 import ShareSearchResults from './search/ShareSearchResults';
+import {
+  LiveSearchScopeBadge,
+  LiveSearchScopeGhostBadge,
+  createLiveSearchScopeBackspaceState,
+  handleLiveSearchScopeBackspace,
+  handleLiveSearchScopeUndo,
+  isLiveSearchDropdownBlocked,
+  liveSearchScopePlaceholderKey,
+  noteLiveSearchScopeQueryInput,
+  resetLiveSearchScopeBackspaceState,
+  resolveLiveSearchScopeGhost,
+} from './search/liveSearchScopeUi';
+import { useLiveSearchScopeStore } from '../store/liveSearchScopeStore';
 import { resolveIndexKey } from '../utils/server/serverIndexKey';
 
 type LiveSearchSource = 'local' | 'network';
@@ -98,7 +111,15 @@ function LiveSearchArtistThumb({ artist }: { artist: Pick<SubsonicArtist, 'id' |
 
 export default function LiveSearch() {
   const { t } = useTranslation();
-  const [query, setQuery] = useState('');
+  const query = useLiveSearchScopeStore(s => s.query);
+  const setQuery = useLiveSearchScopeStore(s => s.setQuery);
+  const scope = useLiveSearchScopeStore(s => s.scope);
+  const setScope = useLiveSearchScopeStore(s => s.setScope);
+  const clearScope = useLiveSearchScopeStore(s => s.clearScope);
+  const undoLiveSearch = useLiveSearchScopeStore(s => s.undo);
+  const scopeBackspaceRef = useRef(createLiveSearchScopeBackspaceState());
+  const location = useLocation();
+  const ghostScope = resolveLiveSearchScopeGhost(location.pathname, scope);
   const [results, setResults] = useState<SearchResults | null>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -137,6 +158,14 @@ export default function LiveSearch() {
   }, [refreshLocalReady, musicLibraryFilterVersion]);
 
   useEffect(() => {
+    resetLiveSearchScopeBackspaceState(scopeBackspaceRef.current);
+  }, [scope]);
+
+  useEffect(() => {
+    noteLiveSearchScopeQueryInput(scopeBackspaceRef.current, query);
+  }, [query]);
+
+  useEffect(() => {
     if (!indexEnabled || !serverId) return;
     let unlistenProgress: (() => void) | undefined;
     let unlistenIdle: (() => void) | undefined;
@@ -161,7 +190,16 @@ export default function LiveSearch() {
     setOpen(false);
     setQuery('');
     setSearchSource(null);
-  }, []);
+  }, [setQuery]);
+
+  const handleQueryChange = useCallback((value: string) => {
+    setQuery(value, { recordUndo: true });
+    if (!value) {
+      setResults(null);
+      setOpen(false);
+      setSearchSource(null);
+    }
+  }, [setQuery]);
 
   /** Leave live search for a full-page route — cancel in-flight queries and reset overlay state. */
   const leaveLiveSearchFor = useCallback((path: string) => {
@@ -175,11 +213,19 @@ export default function LiveSearch() {
     setIsFocused(false);
     inputRef.current?.blur();
     navigate(path);
-  }, [navigate]);
+  }, [navigate, setQuery]);
 
   const share = useShareSearch(query, closeSearch);
 
   useEffect(() => {
+    if (isLiveSearchDropdownBlocked(scope)) {
+      setResults(null);
+      setOpen(false);
+      setSearchSource(null);
+      setLoading(false);
+      return;
+    }
+
     if (share.shareMatch) {
       setResults(null);
       setLoading(false);
@@ -338,9 +384,9 @@ export default function LiveSearch() {
       abort.abort();
       liveSearchGenRef.current += 1;
     };
-  }, [query, share.shareMatch, serverId, indexEnabled, musicLibraryFilterVersion, t]);
+  }, [query, scope, share.shareMatch, serverId, indexEnabled, musicLibraryFilterVersion, t]);
 
-  const isSearchActive = isFocused || open || query.trim().length > 0;
+  const isSearchActive = isFocused || open || query.trim().length > 0 || scope != null;
 
   useEffect(() => {
     const root = ref.current;
@@ -485,6 +531,9 @@ export default function LiveSearch() {
   ] : [];
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (handleLiveSearchScopeUndo(e, undoLiveSearch)) return;
+    if (handleLiveSearchScopeBackspace(e, query, scope, clearScope, scopeBackspaceRef.current)) return;
+    if (isLiveSearchDropdownBlocked(scope)) return;
     if (share.shareMatch) {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -547,46 +596,50 @@ export default function LiveSearch() {
           requestAnimationFrame(() => inputRef.current?.focus());
         }}
       >
-        {loading ? (
-          <span className="live-search-icon animate-spin" style={{ opacity: 0.6 }}>
-            <div style={{ width: 16, height: 16, border: '2px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%' }} />
-          </span>
-        ) : (
-          <Search size={16} className="live-search-icon" />
-        )}
-        <input
-          ref={inputRef}
-          id="live-search-input"
-          className="input live-search-field"
-          type="search"
-          placeholder={t('search.placeholder')}
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          onFocus={() => {
-            setIsFocused(true);
-            if (results) setOpen(true);
-          }}
-          onBlur={() => setIsFocused(false)}
-          onKeyDown={handleKeyDown}
-          aria-autocomplete="list"
-          aria-controls="search-results"
-          aria-expanded={open}
-          autoComplete="off"
-        />
-        {query && (
-          <button
-            className="live-search-clear"
-            onClick={() => {
-              setQuery('');
-              setResults(null);
-              setOpen(false);
-              setSearchSource(null);
+        <div className="live-search-field-cluster">
+          {loading ? (
+            <span className="live-search-leading-icon animate-spin" style={{ opacity: 0.6 }}>
+              <div style={{ width: 16, height: 16, border: '2px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%' }} />
+            </span>
+          ) : (
+            <Search size={16} className="live-search-leading-icon" aria-hidden />
+          )}
+          {scope && (
+            <LiveSearchScopeBadge
+              scope={scope}
+              className="live-search-scope-badge"
+              clearScope={clearScope}
+            />
+          )}
+          {ghostScope && (
+            <LiveSearchScopeGhostBadge
+              scope={ghostScope}
+              className="live-search-scope-badge live-search-scope-badge--ghost"
+              setScope={setScope}
+            />
+          )}
+          <input
+            ref={inputRef}
+            id="live-search-input"
+            className="input live-search-field"
+            type="search"
+            placeholder={t(liveSearchScopePlaceholderKey(scope))}
+            data-tooltip={scope ? t(liveSearchScopePlaceholderKey(scope)) : undefined}
+            data-tooltip-pos="bottom"
+            value={query}
+            onChange={e => handleQueryChange(e.target.value)}
+            onFocus={() => {
+              setIsFocused(true);
+              if (!isLiveSearchDropdownBlocked(scope) && results) setOpen(true);
             }}
-            aria-label={t('search.clearLabel')}
-          >
-            ×
-          </button>
-        )}
+            onBlur={() => setIsFocused(false)}
+            onKeyDown={handleKeyDown}
+            aria-autocomplete="list"
+            aria-controls="search-results"
+            aria-expanded={open && !isLiveSearchDropdownBlocked(scope)}
+            autoComplete="off"
+          />
+        </div>
         <button
           className="live-search-adv-btn"
           type="button"
@@ -607,7 +660,7 @@ export default function LiveSearch() {
         </button>
       </div>
 
-      {open && (
+      {open && !isLiveSearchDropdownBlocked(scope) && (
         <div className="live-search-dropdown" id="search-results" role="listbox" ref={dropdownRef}>
           {searchSource && !share.shareMatch && (
             <div

@@ -1,18 +1,17 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { useLocation, useNavigationType, type NavigationType } from 'react-router-dom';
-import { useAuthStore } from '../store/authStore';
+import { isComposerDetailPath } from '../store/albumBrowseSessionStore';
 import {
-  DEFAULT_ARTIST_BROWSE_RETURN_STATE,
-  type ArtistBrowseReturnState,
-  type ArtistBrowseViewMode,
-  isArtistsBrowsePath,
-  useArtistBrowseSessionStore,
-} from '../store/artistBrowseSessionStore';
-import { isArtistDetailPath } from '../store/albumBrowseSessionStore';
-import { shouldRestoreArtistBrowseSession } from '../utils/navigation/albumDetailNavigation';
+  DEFAULT_COMPOSER_BROWSE_RETURN_STATE,
+  type ComposerBrowseReturnState,
+  type ComposerBrowseViewMode,
+  isComposersBrowsePath,
+  useComposerBrowseSessionStore,
+} from '../store/composerBrowseSessionStore';
+import { shouldRestoreComposerBrowseSession } from '../utils/navigation/albumDetailNavigation';
 import { useLiveSearchScopeStore } from '../store/liveSearchScopeStore';
 
-export type ArtistBrowseScrollSnapshot = {
+export type ComposerBrowseScrollSnapshot = {
   scrollTop: number;
   visibleCount: number;
 };
@@ -21,23 +20,22 @@ function returnStateForNavigation(
   serverId: string,
   navigationType: NavigationType,
   locationState: unknown,
-): ArtistBrowseReturnState {
-  if (!shouldRestoreArtistBrowseSession(navigationType, locationState) || !serverId) {
-    return DEFAULT_ARTIST_BROWSE_RETURN_STATE;
+): ComposerBrowseReturnState {
+  if (!shouldRestoreComposerBrowseSession(navigationType, locationState) || !serverId) {
+    return DEFAULT_COMPOSER_BROWSE_RETURN_STATE;
   }
   return (
-    useArtistBrowseSessionStore.getState().peekReturnStash(serverId)
-    ?? DEFAULT_ARTIST_BROWSE_RETURN_STATE
+    useComposerBrowseSessionStore.getState().peekReturnStash(serverId)
+    ?? DEFAULT_COMPOSER_BROWSE_RETURN_STATE
   );
 }
 
-export function useArtistsBrowseFilters(
+export function useComposersBrowseFilters(
   serverId: string,
-  scrollSnapshotRef?: RefObject<ArtistBrowseScrollSnapshot>,
+  scrollSnapshotRef?: RefObject<ComposerBrowseScrollSnapshot>,
 ) {
   const navigationType = useNavigationType();
   const location = useLocation();
-  const setShowArtistImages = useAuthStore(s => s.setShowArtistImages);
 
   const [letterFilter, setLetterFilter] = useState(
     () => returnStateForNavigation(serverId, navigationType, location.state).letterFilter,
@@ -45,20 +43,18 @@ export function useArtistsBrowseFilters(
   const [starredOnly, setStarredOnly] = useState(
     () => returnStateForNavigation(serverId, navigationType, location.state).starredOnly,
   );
-  const [viewMode, setViewMode] = useState<ArtistBrowseViewMode>(
+  const [viewMode, setViewMode] = useState<ComposerBrowseViewMode>(
     () => returnStateForNavigation(serverId, navigationType, location.state).viewMode,
   );
 
-  const browseStateRef = useRef<ArtistBrowseReturnState>(DEFAULT_ARTIST_BROWSE_RETURN_STATE);
+  const browseStateRef = useRef<ComposerBrowseReturnState>(DEFAULT_COMPOSER_BROWSE_RETURN_STATE);
   const restoredFromStashRef = useRef(false);
-  const showArtistImages = useAuthStore(s => s.showArtistImages);
 
   browseStateRef.current = {
     filter: useLiveSearchScopeStore.getState().query,
     letterFilter,
     starredOnly,
     viewMode,
-    showArtistImages,
   };
 
   useEffect(() => {
@@ -68,41 +64,40 @@ export function useArtistsBrowseFilters(
   useEffect(() => {
     if (!serverId) return;
 
-    if (shouldRestoreArtistBrowseSession(navigationType, location.state)) {
+    if (shouldRestoreComposerBrowseSession(navigationType, location.state)) {
       restoredFromStashRef.current = true;
-      const restored = useArtistBrowseSessionStore.getState().peekReturnStash(serverId);
+      const restored = useComposerBrowseSessionStore.getState().peekReturnStash(serverId);
       if (restored) {
         useLiveSearchScopeStore.getState().setQuery(restored.filter);
         setLetterFilter(restored.letterFilter);
         setStarredOnly(restored.starredOnly);
         setViewMode(restored.viewMode);
-        setShowArtistImages(restored.showArtistImages);
       }
       return;
     }
 
     if (restoredFromStashRef.current) return;
 
-    useArtistBrowseSessionStore.getState().clearReturnStash(serverId);
+    useComposerBrowseSessionStore.getState().clearReturnStash(serverId);
     useLiveSearchScopeStore.getState().setQuery('');
-    setLetterFilter(DEFAULT_ARTIST_BROWSE_RETURN_STATE.letterFilter);
+    setLetterFilter(DEFAULT_COMPOSER_BROWSE_RETURN_STATE.letterFilter);
     setStarredOnly(false);
     setViewMode('grid');
-  }, [serverId, navigationType, location.state, setShowArtistImages]);
+  }, [serverId, navigationType, location.state]);
 
   useEffect(() => {
     return () => {
       if (!serverId) return;
       const path = window.location.pathname;
-      if (isArtistDetailPath(path)) {
+      if (isComposerDetailPath(path)) {
         const snapshot = scrollSnapshotRef?.current;
-        useArtistBrowseSessionStore.getState().stashReturnState(serverId, {
+        useComposerBrowseSessionStore.getState().stashReturnState(serverId, {
           ...browseStateRef.current,
           scrollTop: snapshot?.scrollTop,
           visibleCount: snapshot?.visibleCount,
         });
-      } else if (!isArtistsBrowsePath(path)) {
-        useArtistBrowseSessionStore.getState().clearReturnStash(serverId);
+      } else if (!isComposersBrowsePath(path)) {
+        useComposerBrowseSessionStore.getState().clearReturnStash(serverId);
       }
     };
   }, [serverId, scrollSnapshotRef]);

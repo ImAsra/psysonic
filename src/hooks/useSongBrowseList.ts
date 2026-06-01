@@ -42,16 +42,19 @@ export type SongBrowseListRestore = {
 
 type UseSongBrowseListArgs = {
   enabled: boolean;
+  /** Header scoped browse query (wide title/artist/album search). */
+  searchQuery: string;
   initialRestore?: SongBrowseListRestore | null;
 };
 
 /** Tracks hub song browse — all-library paging or filtered text search. */
-export function useSongBrowseList({ enabled, initialRestore }: UseSongBrowseListArgs) {
+export function useSongBrowseList({ enabled, searchQuery, initialRestore }: UseSongBrowseListArgs) {
   const serverId = useAuthStore(s => s.activeServerId);
   const indexEnabled = useLibraryIndexStore(s => s.isIndexEnabled(serverId));
 
-  const [query, setQuery] = useState(() => initialRestore?.query ?? '');
-  const [debouncedQuery, setDebouncedQuery] = useState(() => initialRestore?.query.trim() ?? '');
+  const [debouncedQuery, setDebouncedQuery] = useState(
+    () => initialRestore?.query.trim() ?? searchQuery.trim(),
+  );
   const [songs, setSongs] = useState<SubsonicSong[]>(() => initialRestore?.songs ?? []);
   const [offset, setOffset] = useState(() => initialRestore?.offset ?? 0);
   const [loading, setLoading] = useState(false);
@@ -63,14 +66,25 @@ export function useSongBrowseList({ enabled, initialRestore }: UseSongBrowseList
 
   const requestSeqRef = useRef(0);
   const localSearchModeRef = useRef(initialRestore?.localSearchMode ?? false);
-  const skipInitialFetchRef = useRef(initialRestore != null);
+  /** Keep stashed songs until the user edits the scoped query (survives fetchSongPage identity changes). */
+  const holdRestoredListRef = useRef(initialRestore != null);
+  const heldRestoredQueryRef = useRef(initialRestore?.query.trim() ?? '');
+
+  const restoreQueryHoldRef = useRef(
+    initialRestore?.query.trim() ? initialRestore.query.trim() : null,
+  );
 
   useEffect(() => {
     if (!enabled) return;
+    const incoming = searchQuery.trim();
+    if (incoming !== '') {
+      restoreQueryHoldRef.current = null;
+    }
+    const effectiveQuery = incoming || restoreQueryHoldRef.current || '';
     const debounceMs = indexEnabled ? BROWSE_TEXT_DEBOUNCE_RACE_MS : BROWSE_TEXT_DEBOUNCE_NETWORK_MS;
-    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), debounceMs);
+    const timer = window.setTimeout(() => setDebouncedQuery(effectiveQuery), debounceMs);
     return () => window.clearTimeout(timer);
-  }, [query, indexEnabled, enabled]);
+  }, [searchQuery, indexEnabled, enabled]);
 
   const fetchSongPage = useCallback(
     async (q: string, pageOffset: number, isStale: () => boolean): Promise<SubsonicSong[]> => {
@@ -114,9 +128,14 @@ export function useSongBrowseList({ enabled, initialRestore }: UseSongBrowseList
 
   useEffect(() => {
     if (!enabled) return;
-    if (skipInitialFetchRef.current) {
-      skipInitialFetchRef.current = false;
-      return;
+
+    if (holdRestoredListRef.current) {
+      const expected = heldRestoredQueryRef.current;
+      if (searchQuery.trim() !== expected || debouncedQuery !== expected) {
+        holdRestoredListRef.current = false;
+      } else {
+        return;
+      }
     }
 
     let cancelled = false;
@@ -152,7 +171,7 @@ export function useSongBrowseList({ enabled, initialRestore }: UseSongBrowseList
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, fetchSongPage, enabled]);
+  }, [debouncedQuery, searchQuery, fetchSongPage, enabled]);
 
   const loadMore = useCallback(async () => {
     if (!enabled || loading || !hasMore) return;
@@ -182,8 +201,6 @@ export function useSongBrowseList({ enabled, initialRestore }: UseSongBrowseList
   }, [enabled, loading, hasMore, debouncedQuery, offset, fetchSongPage]);
 
   return {
-    query,
-    setQuery,
     songs,
     offset,
     loading,

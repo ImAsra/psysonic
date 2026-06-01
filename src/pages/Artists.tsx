@@ -9,8 +9,6 @@ import { useTranslation } from 'react-i18next';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { APP_MAIN_SCROLL_VIEWPORT_ID, ARTISTS_INPAGE_SCROLL_VIEWPORT_ID } from '../constants/appScroll';
 import { useElementClientHeightById, useElementClientHeightForElement } from '../hooks/useResizeClientHeight';
-import { useCardGridMetrics } from '../hooks/useCardGridMetrics';
-import { useRemeasureGridVirtualizer } from '../hooks/useRemeasureGridVirtualizer';
 import { useVirtualizerScrollMargin } from '../hooks/useVirtualizerScrollMargin';
 import { usePerfProbeFlags } from '../utils/perf/perfFlags';
 import {
@@ -32,10 +30,12 @@ import { ArtistsListView } from '../components/artists/ArtistsListView';
 import InpageScrollSentinel from '../components/InpageScrollSentinel';
 import { useArtistsBrowseFilters, type ArtistBrowseScrollSnapshot } from '../hooks/useArtistsBrowseFilters';
 import { useArtistsBrowseScrollRestore } from '../hooks/useArtistsBrowseScrollRestore';
+import { useArtistsBrowseScrollReset } from '../hooks/useArtistsBrowseScrollReset';
 import { useNavigateToArtist } from '../hooks/useNavigateToArtist';
 import { peekArtistBrowseScrollRestore } from '../store/artistBrowseSessionStore';
 import { readArtistBrowseRestore } from '../utils/navigation/albumDetailNavigation';
 
+import { useScopedBrowseSearchQuery } from '../store/liveSearchScopeStore';
 import { useLibraryIndexStore } from '../store/libraryIndexStore';
 
 export default function Artists() {
@@ -51,8 +51,6 @@ export default function Artists() {
   );
 
   const {
-    filter,
-    setFilter,
     letterFilter,
     setLetterFilter,
     starredOnly,
@@ -60,6 +58,8 @@ export default function Artists() {
     viewMode,
     setViewMode,
   } = useArtistsBrowseFilters(serverId, scrollSnapshotRef);
+
+  const artistsSearchQuery = useScopedBrowseSearchQuery('artists');
 
   const {
     scrollBodyEl: artistsScrollBodyEl,
@@ -91,13 +91,18 @@ export default function Artists() {
   });
 
   const { textSearchArtists, textSearchLoading, effectiveFilter } = useBrowseArtistTextSearch(
-    filter,
+    artistsSearchQuery,
     indexEnabled,
     serverId,
   );
   const artists = textSearchArtists ?? catalogArtists;
   const loading = catalogLoading || textSearchLoading;
   const textSearchActive = textSearchArtists != null;
+  /** Scoped/plain text filter — canonical CSS grid, not row virtualization (small result sets). */
+  const artistBrowsePlainLayout =
+    perfFlags.disableMainstageVirtualLists
+    || textSearchActive
+    || artistsSearchQuery.trim().length > 0;
 
   const {
     visibleCount,
@@ -105,7 +110,7 @@ export default function Artists() {
     loadMore: sliceLoadMore,
   } = useClientSliceInfiniteScroll({
     pageSize: PAGE_SIZE,
-    resetDeps: [filter, letterFilter, starredOnly, viewMode, musicLibraryFilterVersion, serverId],
+    resetDeps: [artistsSearchQuery, letterFilter, starredOnly, viewMode, musicLibraryFilterVersion, serverId],
     getScrollRoot: getArtistsScrollRoot,
     scrollRootEl: artistsScrollBodyEl,
     restoreDisplayCount: restoreVisibleCountRef.current,
@@ -224,7 +229,7 @@ export default function Artists() {
   });
 
   const mainstageHeaderTight = useMainstageInpageHeaderTight(artistsScrollBodyEl, [
-    filter,
+    artistsSearchQuery,
     letterFilter,
     starredOnly,
     viewMode,
@@ -243,48 +248,6 @@ export default function Artists() {
     [getArtistsScrollRoot],
   );
 
-  const artistGridMeasureRef = useRef<HTMLDivElement>(null);
-  const { gridCols: artistGridCols, rowHeightEst: artistGridRowHeightEst } = useCardGridMetrics(
-    artistGridMeasureRef,
-    viewMode === 'grid',
-    'artist',
-    visible.length,
-  );
-
-  const artistVirtualRowCount = Math.max(0, Math.ceil(visible.length / Math.max(1, artistGridCols)));
-
-  const artistGridOverscan = Math.max(
-    2,
-    Math.ceil(artistsInpageScrollHeight / Math.max(1, artistGridRowHeightEst)),
-  );
-
-  const artistGridScrollMargin = useVirtualizerScrollMargin(
-    artistGridMeasureRef,
-    getInpageScrollElement,
-    {
-      active: !perfFlags.disableMainstageVirtualLists && viewMode === 'grid',
-      deps: [artistVirtualRowCount, artistGridCols],
-    },
-  );
-
-  const artistGridVirtualizer = useVirtualizer({
-    count:
-      perfFlags.disableMainstageVirtualLists || viewMode !== 'grid'
-        ? 0
-        : artistVirtualRowCount,
-    getScrollElement: getInpageScrollElement,
-    estimateSize: () => artistGridRowHeightEst,
-    overscan: artistGridOverscan,
-    scrollMargin: artistGridScrollMargin,
-  });
-
-  useRemeasureGridVirtualizer(artistGridVirtualizer, {
-    active: !perfFlags.disableMainstageVirtualLists && viewMode === 'grid' && artistVirtualRowCount > 0,
-    gridCols: artistGridCols,
-    rowHeightEst: artistGridRowHeightEst,
-    virtualRowCount: artistVirtualRowCount,
-  });
-
   const artistListOverscan = Math.max(
     12,
     Math.ceil(artistsInpageScrollHeight / ARTIST_LIST_ROW_EST),
@@ -295,14 +258,14 @@ export default function Artists() {
     artistListWrapRef,
     getInpageScrollElement,
     {
-      active: !perfFlags.disableMainstageVirtualLists && viewMode === 'list',
+      active: !artistBrowsePlainLayout && viewMode === 'list',
       deps: [artistListFlatRows.length],
     },
   );
 
   const artistListVirtualizer = useVirtualizer({
     count:
-      perfFlags.disableMainstageVirtualLists || viewMode !== 'list' ? 0 : artistListFlatRows.length,
+      artistBrowsePlainLayout || viewMode !== 'list' ? 0 : artistListFlatRows.length,
     getScrollElement: getInpageScrollElement,
     estimateSize: index => {
       const row = artistListFlatRows[index];
@@ -320,6 +283,27 @@ export default function Artists() {
     scrollMargin: artistListScrollMargin,
   });
 
+  const browseScrollResetKey = [
+    artistsSearchQuery,
+    letterFilter,
+    starredOnly,
+    viewMode,
+    serverId,
+    musicLibraryFilterVersion,
+    textSearchArtists?.length ?? '',
+    textSearchArtists?.[0]?.id ?? '',
+  ].join('\0');
+
+  useArtistsBrowseScrollReset({
+    scrollSnapshotRef,
+    getScrollRoot: getArtistsScrollRoot,
+    isScrollRestorePending,
+    resetKey: browseScrollResetKey,
+    viewMode,
+    listVirtualize: !artistBrowsePlainLayout,
+    listVirtualizer: artistListVirtualizer,
+  });
+
   return (
     <div
       className={`content-body animate-fade-in mainstage-inpage-split${mainstageHeaderTight ? ' mainstage-inpage--header-tight' : ''}`}
@@ -333,14 +317,6 @@ export default function Artists() {
                   ? t('artists.selectionCount', { count: selectedIds.size })
                   : t('artists.title')}
               </h1>
-              <input
-                className="input"
-                style={{ maxWidth: 220 }}
-                placeholder={t('artists.search')}
-                value={filter}
-                onChange={e => setFilter(e.target.value)}
-                id="artist-filter-input"
-              />
               {textSearchLoading && (
                 <div className="spinner" style={{ width: 16, height: 16, flexShrink: 0 }} />
               )}
@@ -432,13 +408,8 @@ export default function Artists() {
         {!loading && !pendingLetterMatch && viewMode === 'grid' && (
           <ArtistsGridView
             visible={visible}
-            gridCols={artistGridCols}
-            measureRef={artistGridMeasureRef}
-            virtualization={
-              perfFlags.disableMainstageVirtualLists
-                ? null
-                : { virtualizer: artistGridVirtualizer, scrollMargin: artistGridScrollMargin }
-            }
+            disableVirtualization={artistBrowsePlainLayout}
+            layoutKey={browseScrollResetKey}
             selectionMode={selectionMode}
             selectedIds={selectedIds}
             selectedArtists={selectedArtists}
@@ -452,7 +423,7 @@ export default function Artists() {
 
         {!loading && !pendingLetterMatch && viewMode === 'list' && (
           <ArtistsListView
-            virtualized={!perfFlags.disableMainstageVirtualLists}
+            virtualized={!artistBrowsePlainLayout}
             groups={groups}
             letters={letters}
             artistListFlatRows={artistListFlatRows}
