@@ -79,9 +79,14 @@ export default function CoverCacheStrategySection() {
     );
   }, [servers, refreshRow]);
 
+  // Recompute on entry only. Live updates during an active backfill arrive via the
+  // `cover:library-progress` event (carries done/total/pending/bytes/entryCount), and
+  // clearing the cache emits `cover:cache-cleared`. A slow 5-minute tick is just a
+  // safety net for changes made outside this view (e.g. browsing-time caching); it is
+  // not needed for correctness, so we avoid re-walking the cover dirs in a tight loop.
   useEffect(() => {
     refreshAll();
-    const id = window.setInterval(refreshAll, 15_000);
+    const id = window.setInterval(refreshAll, 300_000);
     return () => window.clearInterval(id);
   }, [refreshAll]);
 
@@ -128,9 +133,6 @@ export default function CoverCacheStrategySection() {
           refreshAll();
         }
       }));
-      unsubs.push(await listen('cover:tier-ready', () => {
-        refreshAll();
-      }));
     })();
     return () => {
       for (const u of unsubs) u();
@@ -173,6 +175,9 @@ export default function CoverCacheStrategySection() {
       await coverCacheClearServer(clearTarget.indexKey);
       clearDiskSrcCacheForServer(clearTarget.indexKey);
       await refreshRow(clearTarget.serverId, clearTarget.indexKey);
+      if (clearTarget.serverId === activeServerId) {
+        wakeLibraryCoverBackfill();
+      }
       showToast(t('settings.coverCacheStrategyClearSuccess'), 4000, 'success');
     } catch {
       showToast(t('settings.coverCacheStrategyClearError'), 5000, 'error');

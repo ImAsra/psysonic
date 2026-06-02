@@ -223,9 +223,15 @@ export async function libraryCoverBackfillPulse(): Promise<CoverBackfillPulseRes
   return invoke<CoverBackfillPulseResult>('library_cover_backfill_pulse');
 }
 
-/** Start one full-catalog pass on the native runtime (works when the window is inactive). */
-export async function libraryCoverBackfillRunFullPass(): Promise<{ started: boolean }> {
-  return invoke<{ started: boolean }>('library_cover_backfill_run_full_pass');
+/**
+ * Start one full-catalog pass on the native runtime (works when the window is inactive).
+ * `force` bypasses the idle gate and clears the fetch-failed backoff so previously
+ * unfetchable (404) covers are retried — used by the manual "Run full pass now".
+ */
+export async function libraryCoverBackfillRunFullPass(
+  force = false,
+): Promise<{ started: boolean }> {
+  return invoke<{ started: boolean }>('library_cover_backfill_run_full_pass', { force });
 }
 
 export async function libraryCoverBackfillResetCursor(): Promise<void> {
@@ -235,6 +241,11 @@ export async function libraryCoverBackfillResetCursor(): Promise<void> {
 /** Yield native library backfill while the user navigates (visible covers first). */
 export async function libraryCoverBackfillSetUiPriority(hold: boolean): Promise<void> {
   return invoke('library_cover_backfill_set_ui_priority', { hold });
+}
+
+/** Perf-probe only: retune cover backfill threads (download + encode). Returns the clamped value applied. */
+export async function libraryCoverBackfillSetParallel(threads: number): Promise<number> {
+  return invoke<number>('library_cover_backfill_set_parallel', { threads });
 }
 
 export async function libraryCoverClearFetchFailures(serverIndexKey: string): Promise<number> {
