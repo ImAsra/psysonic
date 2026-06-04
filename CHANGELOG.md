@@ -563,6 +563,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **Album grids and song rails:** overlay `pointer-events` so the dim layer does not steal hover from the card.
 
 
+### Mainstage album rails — stable New badge on first hover
+
+**By [@cucadmuh](https://github.com/cucadmuh), PR [#986](https://github.com/Psychotoxical/psysonic/pull/986)**
+
+* Horizontal album rails (Home New Releases, Discover, Favorites, Statistics, search rows, …) no longer hide the **New** / offline cover badges during hover zoom — cover stacking is shared with grid pages; rails keep dim-on-`::before` for play controls.
+
 
 ### Album view — bulk add to playlist selection
 
