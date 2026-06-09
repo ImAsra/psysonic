@@ -2,9 +2,10 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
-import { AlertTriangle, CheckCircle2, Globe, Lock, LogOut, Pencil, Plus, Power, Server, Sparkles, Trash2, User, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Info, Lock, LogOut, Pencil, Plus, Power, Server, Sparkles, Wifi, WifiOff } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
-import { formatServerSoftware } from '../../utils/server/subsonicServerIdentity';
+import { formatServerSoftware, isNavidromeAudiomuseSoftwareEligible, type InstantMixProbeResult, type SubsonicServerIdentity } from '../../utils/server/subsonicServerIdentity';
+import { buildCapabilityContext } from '../../serverCapabilities/context';
 import { useLibraryIndexStore } from '../../store/libraryIndexStore';
 import { libraryDeleteServerData, librarySyncClearSession } from '../../api/library';
 import { bootstrapIndexedServer } from '../../utils/library/librarySession';
@@ -25,34 +26,35 @@ import {
 } from '../../utils/server/serverUrlRemigration';
 import { useConfirmModalStore } from '../../store/confirmModalStore';
 import { showToast } from '../../utils/ui/toast';
-import PerfProbeStatusBadge, { type PerfProbeBadgeTone } from '../sidebar/perfProbe/PerfProbeStatusBadge';
 import { FEATURE_AUDIOMUSE_SIMILAR_TRACKS } from '../../serverCapabilities/catalog';
-import { resolveFeatureForServer } from '../../serverCapabilities/storeView';
-import type { CapabilityStatus, ResolvedCapability } from '../../serverCapabilities/types';
-import { serverListDisplayLabel } from '../../utils/server/serverDisplayName';
+import { isFeatureActiveForServer, resolveFeatureForServer } from '../../serverCapabilities/storeView';
+import type { ResolvedCapability } from '../../serverCapabilities/types';
+import { serverIdentityLabel, serverListDisplayLabel, serverSettingsEntryTitle } from '../../utils/server/serverDisplayName';
 import { serverIndexKeyForProfile } from '../../utils/server/serverIndexKey';
 import { switchActiveServer } from '../../utils/server/switchActiveServer';
 import { AddServerForm } from './AddServerForm';
+import { ServerCapabilityHeaderBadge } from './ServerCapabilityHeaderBadge';
 import { ServerGripHandle } from './ServerGripHandle';
+import { tooltipAttrs } from '../tooltipAttrs';
 
 const AUDIOMUSE_NV_PLUGIN_URL = 'https://github.com/NeptuneHub/AudioMuse-AI-NV-plugin';
 
-function audiomuseProbeBadge(
-  status: CapabilityStatus,
-  t: (key: string) => string,
-): { tone: PerfProbeBadgeTone; label: string } {
-  switch (status) {
-    case 'present': return { tone: 'ok', label: t('settings.audiomuseStatusActive') };
-    case 'absent': return { tone: 'muted', label: t('settings.audiomuseStatusNotDetected') };
-    case 'error': return { tone: 'error', label: t('settings.audiomuseStatusProbeFailed') };
-    default: return { tone: 'warn', label: t('settings.audiomuseStatusChecking') };
-  }
-}
-
-/** Row visibility: hide only when a manual (legacy) strategy proves the feature absent. */
+/** Row visibility: same as main — hide only when manual strategy proves the feature absent. */
 function showAudiomuseRow(resolved: ResolvedCapability | null): boolean {
   if (!resolved || resolved.strategyId === null || resolved.status === 'ineligible') return false;
   return !(resolved.activation === 'manual' && resolved.status === 'absent');
+}
+
+/** Legacy Navidrome (< 0.62): manual toggle row below the card (not the auto header badge). */
+function showLegacyAudiomuseToggleRow(
+  identity: SubsonicServerIdentity | undefined,
+  instantMixProbe: InstantMixProbeResult | undefined,
+  resolved: ResolvedCapability | null,
+): boolean {
+  const ctx = buildCapabilityContext(identity);
+  if (ctx.isNavidrome && ctx.semverGte([0, 62, 0])) return false;
+  if (showAudiomuseRow(resolved)) return true;
+  return isNavidromeAudiomuseSoftwareEligible(identity) && instantMixProbe !== 'empty';
 }
 
 type ServerDropTarget = { idx: number; before: boolean } | null;
@@ -388,6 +390,10 @@ export function ServersTab({
                     editingServer={srv}
                     onSave={(data) => handleEditServer(srv.id, data)}
                     onCancel={() => setEditingServerId(null)}
+                    onDelete={async () => {
+                      await deleteServer(srv);
+                      setEditingServerId(null);
+                    }}
                   />
                 );
               }
@@ -396,6 +402,15 @@ export function ServersTab({
               const isBefore = psyDragState.isDragging && serverDropTarget?.idx === srvIdx && serverDropTarget.before;
               const isAfter  = psyDragState.isDragging && serverDropTarget?.idx === srvIdx && !serverDropTarget.before;
               const serverSoftware = formatServerSoftware(auth.subsonicServerIdentityByServer[srv.id]);
+              const serverIdentity = auth.subsonicServerIdentityByServer[srv.id];
+              const resolvedAudiomuse = resolveFeatureForServer(srv.id, FEATURE_AUDIOMUSE_SIMILAR_TRACKS);
+              const versionTooltip = serverSoftware ?? t('settings.serverVersionUnknown');
+              const audiomuseActive = isFeatureActiveForServer(srv.id, FEATURE_AUDIOMUSE_SIMILAR_TRACKS);
+              const showLegacyAudiomuseToggle = showLegacyAudiomuseToggleRow(
+                serverIdentity,
+                auth.instantMixProbeByServer[srv.id],
+                resolvedAudiomuse,
+              );
               return (
                 <div
                   key={srv.id}
@@ -420,64 +435,41 @@ export function ServersTab({
                     <ServerGripHandle idx={srvIdx} label={serverListDisplayLabel(srv, auth.servers)} />
                     <div style={{ flex: 1, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '2px' }}>
-                        <span style={{ fontWeight: 600 }}>{serverListDisplayLabel(srv, auth.servers)}</span>
-                        {isActive && (
-                          <span style={{ fontSize: 11, background: 'var(--accent)', color: 'var(--text-on-accent)', padding: '1px 6px', borderRadius: 'var(--radius-sm)', fontWeight: 600 }}>
-                            {t('settings.serverActive')}
-                          </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '2px', flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 600 }}>{serverSettingsEntryTitle(srv)}</span>
+                        <ServerCapabilityHeaderBadge
+                          serverId={srv.id}
+                          feature={FEATURE_AUDIOMUSE_SIMILAR_TRACKS}
+                        />
+                        {resolvedAudiomuse?.activation === 'auto' && audiomuseActive && auth.audiomuseNavidromeIssueByServer[srv.id] && (
+                          <AlertTriangle
+                            size={16}
+                            style={{ color: 'var(--warning, #f59e0b)', flexShrink: 0 }}
+                            data-tooltip={t('settings.audiomuseIssueHint')}
+                            aria-label={t('settings.audiomuseIssueHint')}
+                          />
                         )}
                       </div>
-                      {serverSoftware && (
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginBottom: '2px', overflow: 'hidden' }}>
-                          <Server size={10} style={{ flexShrink: 0 }} />
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{serverSoftware}</span>
-                        </div>
-                      )}
                       <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
-                        {srv.url.startsWith('https://') ? (
-                          <Lock size={10} style={{ color: 'var(--positive)', flexShrink: 0 }} />
-                        ) : (
-                          <Globe size={10} style={{ flexShrink: 0 }} />
+                        {srv.url.startsWith('https://') && (
+                          <Lock size={10} style={{ color: 'var(--positive)', flexShrink: 0 }} aria-hidden />
                         )}
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {srv.url.replace(/^https?:\/\//, '')}
+                          {serverIdentityLabel(srv)}
                         </span>
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
-                        <User size={10} />
-                        {srv.username}
+                        <button
+                          type="button"
+                          className="btn btn-ghost settings-server-version-info-btn"
+                          {...tooltipAttrs(versionTooltip, { click: true })}
+                        >
+                          <Info size={12} aria-hidden />
+                        </button>
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '6px', flexShrink: 0, alignItems: 'center', marginLeft: 'auto' }}>
                       {status === 'ok' && <CheckCircle2 size={16} style={{ color: 'var(--positive)' }} />}
                       {status === 'error' && <WifiOff size={16} style={{ color: 'var(--danger)' }} />}
                       {status === 'testing' && <div className="spinner" style={{ width: 16, height: 16 }} />}
-                      <button
-                        className="btn btn-surface"
-                        style={{ fontSize: 12, padding: '4px 10px' }}
-                        onClick={() => testConnection(srv)}
-                        disabled={status === 'testing'}
-                        data-tooltip={t('settings.testBtn')}
-                        aria-label={t('settings.testBtn')}
-                      >
-                        <Wifi size={13} />
-                        <span className="server-card-btn-label">{t('settings.testBtn')}</span>
-                      </button>
-                      {!isActive && (
-                        <button
-                          className="btn btn-primary"
-                          style={{ fontSize: 12, padding: '4px 10px' }}
-                          onClick={() => switchToServer(srv)}
-                          disabled={status === 'testing'}
-                          id={`settings-use-server-${srv.id}`}
-                          data-tooltip={t('settings.useServer')}
-                          aria-label={t('settings.useServer')}
-                        >
-                          <Power size={13} />
-                          <span className="server-card-btn-label">{t('settings.useServer')}</span>
-                        </button>
-                      )}
                       <button
                         className="btn btn-ghost"
                         style={{ padding: '4px 8px' }}
@@ -492,14 +484,34 @@ export function ServersTab({
                         <Pencil size={14} />
                       </button>
                       <button
-                        className="btn btn-ghost"
-                        style={{ color: 'var(--danger)', padding: '4px 8px' }}
-                        onClick={() => void deleteServer(srv)}
-                        data-tooltip={t('settings.deleteServer')}
-                        id={`settings-delete-server-${srv.id}`}
+                        className="btn btn-surface"
+                        style={{ fontSize: 12, padding: '4px 10px' }}
+                        onClick={() => testConnection(srv)}
+                        disabled={status === 'testing'}
+                        data-tooltip={t('settings.testBtn')}
+                        aria-label={t('settings.testBtn')}
                       >
-                        <Trash2 size={14} />
+                        <Wifi size={13} />
+                        <span className="server-card-btn-label">{t('settings.testBtn')}</span>
                       </button>
+                      {isActive ? (
+                        <span className="settings-server-inline-badge settings-server-inline-badge--positive settings-server-use-active-slot">
+                          {t('settings.serverActive')}
+                        </span>
+                      ) : (
+                        <button
+                          className="btn btn-primary settings-server-use-active-slot"
+                          style={{ fontSize: 12, padding: '4px 10px' }}
+                          onClick={() => switchToServer(srv)}
+                          disabled={status === 'testing'}
+                          id={`settings-use-server-${srv.id}`}
+                          data-tooltip={t('settings.useServer')}
+                          aria-label={t('settings.useServer')}
+                        >
+                          <Power size={13} />
+                          <span className="server-card-btn-label">{t('settings.useServer')}</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                   </div>
@@ -515,11 +527,8 @@ export function ServersTab({
                     onCancel={() => void librarySync.handleCancel()}
                   />
                   {(() => {
-                    const resolved = resolveFeatureForServer(srv.id, FEATURE_AUDIOMUSE_SIMILAR_TRACKS);
-                    if (!showAudiomuseRow(resolved) || !resolved) return null;
-                    const autoManaged = resolved.activation === 'auto';
-                    const probeBadge = audiomuseProbeBadge(resolved.status, t);
-                    const audiomuseActive = !!auth.audiomuseNavidromeByServer[srv.id];
+                    if (!showLegacyAudiomuseToggle) return null;
+                    const audiomuseManualActive = !!auth.audiomuseNavidromeByServer[srv.id];
                     return (
                     <div
                       className="settings-toggle-row"
@@ -531,7 +540,7 @@ export function ServersTab({
                         <div>
                           <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                             {t('settings.audiomuseTitle')}
-                            {audiomuseActive && auth.audiomuseNavidromeIssueByServer[srv.id] && (
+                            {audiomuseManualActive && auth.audiomuseNavidromeIssueByServer[srv.id] && (
                               <AlertTriangle
                                 size={16}
                                 style={{ color: 'var(--warning, #f59e0b)', flexShrink: 0 }}
@@ -540,39 +549,33 @@ export function ServersTab({
                               />
                             )}
                           </div>
-                          {!autoManaged && (
-                            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                              <Trans
-                                i18nKey="settings.audiomuseDesc"
-                                components={{
-                                  pluginLink: (
-                                    <a
-                                      href={AUDIOMUSE_NV_PLUGIN_URL}
-                                      onClick={e => {
-                                        e.preventDefault();
-                                        void openUrl(AUDIOMUSE_NV_PLUGIN_URL);
-                                      }}
-                                      style={{ color: 'var(--accent)', textDecoration: 'underline' }}
-                                    />
-                                  ),
-                                }}
-                              />
-                            </div>
-                          )}
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                            <Trans
+                              i18nKey="settings.audiomuseDesc"
+                              components={{
+                                pluginLink: (
+                                  <a
+                                    href={AUDIOMUSE_NV_PLUGIN_URL}
+                                    onClick={e => {
+                                      e.preventDefault();
+                                      void openUrl(AUDIOMUSE_NV_PLUGIN_URL);
+                                    }}
+                                    style={{ color: 'var(--accent)', textDecoration: 'underline' }}
+                                  />
+                                ),
+                              }}
+                            />
+                          </div>
                         </div>
                       </div>
-                      {autoManaged ? (
-                        <PerfProbeStatusBadge tone={probeBadge.tone}>{probeBadge.label}</PerfProbeStatusBadge>
-                      ) : (
-                        <label className="toggle-switch" aria-label={t('settings.audiomuseTitle')}>
-                          <input
-                            type="checkbox"
-                            checked={audiomuseActive}
-                            onChange={e => auth.setAudiomuseNavidromeEnabled(srv.id, e.target.checked)}
-                          />
-                          <span className="toggle-track" />
-                        </label>
-                      )}
+                      <label className="toggle-switch" aria-label={t('settings.audiomuseTitle')}>
+                        <input
+                          type="checkbox"
+                          checked={audiomuseManualActive}
+                          onChange={e => auth.setAudiomuseNavidromeEnabled(srv.id, e.target.checked)}
+                        />
+                        <span className="toggle-track" />
+                      </label>
                     </div>
                     );
                   })()}

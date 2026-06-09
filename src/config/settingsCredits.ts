@@ -158,6 +158,7 @@ const CONTRIBUTOR_ENTRIES = [
       'Artist page: Top Tracks play when album list is empty on the page (PR #1031)',
       'PsyLab Connections tab with server capability readout, Navidrome admin-role probe, and tab-bar layout fix; server-capability framework with AudioMuse detection via OpenSubsonic sonicSimilarity and sonic Instant Mix routing on Navidrome ≥0.62 (PR #1033)',
       'Library DB: named slow-write op labels for macOS playback-stall diagnosis (PR #1043)',
+      'Settings → Servers: compact two-line cards, capability header badges, unified use/active action, delete in edit form, click-pinned version tooltip (PR #1054)',
     ],
   },
   {
