@@ -1,0 +1,16 @@
+name: Publish to WinGet
+
+on:
+  release:
+    types: [released]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Submit to WinGet Community Repository
+        uses: vedantmgoyal9/winget-releaser@v1
+        with:
+          identifier: Psychotoxical.Psysonic
+          installers-regex: 'Psysonic_.*_x64-setup\.exe$'
+          token: ${{ secrets.WINGET_TOKEN }}
