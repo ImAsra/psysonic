@@ -4,48 +4,106 @@ User-facing release highlights for the in-app **What's New** screen. Maintainers
 current line before promoting to `next` / `release`. Technical details and PR credits stay in
 `CHANGELOG.md`.
 
+Within each section, order by **user impact** (most noticeable first) — not PR merge order.
+`CHANGELOG.md` keeps strict PR order inside Added / Changed / Fixed.
+
 ## [1.48.0]
 
 ## Highlights
 
+### Offline listening
+
+- When the server is unreachable, browse and detail pages show what you already have locally instead of empty errors — albums, artists, playlists, and cross-server favorites.
+- Starred tracks, pinned albums, and playlists live under one **media** folder; browse them in **Offline Library** and see disk usage at a glance.
+- **Favorites auto-sync** keeps loved songs on disk; pinned albums and playlists refresh when the library index updates.
+
+### Music Network — scrobble beyond Last.fm
+
+- **Settings → Integrations** now hosts a **Music Network**: connect **Last.fm**, **Libre.fm**, **ListenBrainz**, **Maloja**, **Rocksky**, **Koito**, or your own **GNU FM** instance — and scrobble to several at once.
+- Pick a **primary** service for loved tracks, similar artists, and stats; other connections still receive scrobbles. Your existing Last.fm setup migrates automatically.
+- A master switch turns the whole network on or off.
+
 ### Theme Store
 
-- Browse and install community themes from **Settings → Themes** — search, dark/light filter, and full-size previews.
+- Browse and install community themes from **Settings → Themes** — search, dark/light filter, full-size previews, and sort by popularity or date.
 - Six palettes ship with the app; everything else installs on demand and works offline after the first download.
+- **Now Playing** follows every theme cleanly, including light palettes.
 - Import a theme from a local `.zip` when you have a package from a friend or your own design.
 - The sidebar nudges you when an installed theme has an update; one-click update from the theme card.
 
-### Offline listening
-
-- Starred tracks and pinned albums stay on disk under one **media** folder — browse them in **Offline Library**.
-- Favorites can sync automatically; pinned albums and playlists refresh when the library index updates.
-- When the server is unreachable, browse and detail pages show what you already have locally instead of empty errors.
-
 ### Fullscreen player
 
-- Rebuilt for much lower CPU and memory use: a calm, sharp fullscreen view with album art, waveform seekbar, up-next queue, synced lyrics, ratings, and a clock.
+- Rebuilt for much lower CPU and memory use: a calm, sharp fullscreen view with album art, waveform seekbar, up-next queue, synced lyrics, ratings, and a clock that follows your **Clock format** setting.
+- The song title no longer shows a leading track number, and descenders (g, j, p, q, y) are no longer clipped.
+
+### Live — richer now playing on Navidrome 0.62+
+
+- On servers with OpenSubsonic **playbackReport** (Navidrome ≥ 0.62), **Live** shows who is playing or paused, how far into the track they are, and playback speed when another client sends it — with smooth position updates between refreshes.
 
 ### Queue — Timeline mode
 
 - A third queue layout keeps the current track in the middle with history above and up next below — great for long listening sessions. Cycle the header control or pick it in **Settings → Personalisation → Queue display**.
 
-### Sidebar
+### Settings → Servers
 
-- Optional **Settings → Sidebar** toggle pins **Now Playing** to the top of the sidebar.
+- Each card shows the server software and version (e.g. **Navidrome 0.62.0**) under the name, with a cleaner two-line layout and compact actions.
+- Navidrome **0.62+** shows a green **AudioMuse-AI** badge when the plugin is detected — no manual toggle on current Navidrome.
+
+### Sidebar — pin Now Playing to the top
+
+- New **Settings → Sidebar** toggle moves **Now Playing** to the top of the sidebar instead of the bottom (off by default).
 
 ### Startup
 
 - A themed loading splash appears while the app starts — colours follow your active theme, including community palettes.
 
-### Settings → Servers
+### What's New page
 
-- Server cards are easier to scan: software version on the card, compact actions, and a green **AudioMuse-AI** badge on Navidrome 0.62+ when the plugin is detected.
+- Highlights like this list load from the release on startup (and cache for offline). A **Full changelog** tab on the same page holds the technical detail.
 
 ## Improved
 
-- Audio decoding runs on **Symphonia 0.6** for current and future codec fixes.
-- **Settings → About** shows a clearer open-source licenses panel.
+- Audio decoding runs on **Symphonia 0.6**; streams start sooner and recover from stalls without restarting the player.
+- The **Preload Next Track** toggle under **Settings → Storage → Buffering** is gone — playback no longer waits on that extra RAM prefetch. Gapless, crossfade, and Hot Cache behave as before.
 
 ## Fixed
 
-- Smoother playback and library behaviour across offline mode, theme switching, and server reconnect — see `CHANGELOG.md` for the full list.
+### Playback and audio
+
+- **Windows:** the app no longer keeps the audio device open while idle, so the system can sleep when music is not playing.
+- **macOS:** steady playback stutter from background device polling is gone on the default output path.
+- After a long pause, the seekbar shows the saved position immediately and the next **Play** resumes without an audible blip at track start.
+- **Stop** keeps the real waveform on the seekbar instead of falling back to flat bars.
+
+### Offline, Now Playing, and Navidrome
+
+- Now Playing cards (**from this album**, discography, most played) stay populated during cached and offline playback instead of blanking out on track change.
+- Navidrome **Show in Now Playing** and play-count scrobbles work when audio plays from hot cache, offline pins, or auto-synced favorites.
+- Mixed-server queues still report to the correct Navidrome server.
+
+### Themes and integrations
+
+- Favoriting from the player bar, fullscreen player, or shortcuts updates the star in track lists and playlists immediately.
+- Discord Rich Presence shows album art again when covers come from the server.
+- Focus rings and dropdown borders follow the active theme consistently.
+
+### Browse and library
+
+- Tracks tagged with several genres in one field (e.g. `Metal/Ambient/Experimental`) match **each genre** again in browse, filters, and search.
+- **All Albums → Only compilations** returns results for common tagging patterns.
+- Album grids show the album artist on compilations instead of a random track artist.
+- Song rails (**Random Picks**, **Discover Songs**, etc.) link each name in multi-artist credits separately.
+- **Artist → Top Tracks** play works even when the artist page has no albums loaded yet.
+- **Home → Most Played** no longer jumps the page when you load more albums.
+- **Mainstage** hero backdrop stays in sync when you skip albums quickly.
+
+### Other
+
+- **Linux:** the `curl | bash` auto-installer works again.
+- **Linux:** internet radio no longer appears twice in the desktop now-playing overlay.
+- The active server card under **Settings → Servers** draws a complete border on all sides.
+
+## Under the hood
+
+- Navidrome **0.62+** auto-detects **AudioMuse-AI** and routes Instant Mix / Lucky Mix through the smarter API when the plugin is present — older Navidrome keeps the manual toggle you already know.
+- Future release highlights can refresh on the **What's New** page without waiting for a full app update download.
