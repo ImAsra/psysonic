@@ -1,16 +1,21 @@
 name: Publish to WinGet
-
 on:
   release:
     types: [released]
-
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+      - name: Derive winget version from app-v* tag
+        id: ver
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: echo "value=${TAG#app-v}" >> "$GITHUB_OUTPUT"
+
       - name: Submit to WinGet Community Repository
-        uses: vedantmgoyal9/winget-releaser@v1
+        uses: vedantmgoyal9/winget-releaser@v2
         with:
           identifier: Psychotoxical.Psysonic
+          version: ${{ steps.ver.outputs.value }}
           installers-regex: 'Psysonic_.*_x64-setup\.exe$'
           token: ${{ secrets.WINGET_TOKEN }}
