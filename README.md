@@ -154,9 +154,9 @@ Linux builds are also available through GitHub Releases, AUR and Cachix/Nix.
 
 ## Windows
 
-Download the latest installer from the [GitHub Releases](https://github.com/Psychotoxical/psysonic/releases/latest).
-or,
-install via Windows Package Manager (WinGet):
+Download the latest installer from the [GitHub Releases](https://github.com/Psychotoxical/psysonic/releases/latest).  
+or,  
+install via Windows Package Manager (WinGet):  
 ```powershell
 winget install Psysonic
 ```
