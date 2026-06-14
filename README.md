@@ -158,7 +158,7 @@ Download the latest installer from the [GitHub Releases](https://github.com/Psyc
 or,
 install via Windows Package Manager (WinGet):
 ```powershell
-winget install Psychotoxical.Psysonic
+winget install Psysonic
 ```
 ## macOS
 
