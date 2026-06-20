@@ -309,6 +309,12 @@ async fn ensure_one(
         password: session.password,
         library_bulk: true,
         library_server_id: Some(session.library_server_id),
+        // Library backfill never touches external providers (§15).
+        external_artwork_enabled: false,
+        surface_kind: None,
+        artist_name: None,
+        album_title: None,
+        external_artwork_byok: None,
     };
     let _ = CoverCacheState::ensure_inner(&st, &app, &args, Some(http_sem)).await;
 }

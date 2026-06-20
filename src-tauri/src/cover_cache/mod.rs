@@ -3,6 +3,8 @@
 mod backfill_worker;
 mod disk;
 mod encode;
+mod external;
+mod external_ensure;
 mod fetch;
 
 use disk::{cover_dir, tier_exists, tier_path, DERIVE_TIERS};
@@ -133,6 +135,27 @@ pub struct CoverCacheEnsureArgs {
     /// with the album/artist name. On-demand UI ensures leave it `None`.
     #[serde(default)]
     pub library_server_id: Option<String>,
+    /// Image-scraper spike (§16 P0): when true, an artist `fanart` ensure may
+    /// fetch a fanart.tv background into `{tier}-fanart.webp`. Inert unless the
+    /// fanart project key is present (`PSYSONIC_FANART_KEY`). Off by default.
+    #[serde(default)]
+    pub external_artwork_enabled: bool,
+    /// Surface intent for external artwork — `fanart` for the 16:9 artist
+    /// background. `None` on plain cover ensures.
+    #[serde(default)]
+    pub surface_kind: Option<String>,
+    /// Artist display name — context for the §19 name→MusicBrainz fallback when
+    /// the artist carries no tag MBID. `None` skips that fallback.
+    #[serde(default)]
+    pub artist_name: Option<String>,
+    /// Album title currently in context (fullscreen playback) — disambiguates
+    /// the name→MusicBrainz query (§19).
+    #[serde(default)]
+    pub album_title: Option<String>,
+    /// Optional BYOK personal fanart.tv key from settings — sent in addition to
+    /// the project key (§22). Falls back to the `PSYSONIC_FANART_CLIENT_KEY` env.
+    #[serde(default)]
+    pub external_artwork_byok: Option<String>,
 }
 
 fn cover_dir_for_args(root: &Path, args: &CoverCacheEnsureArgs) -> PathBuf {
@@ -148,6 +171,9 @@ const COVER_CPU_UI_CONCURRENCY: usize = 2;
 const COVER_CPU_BACKFILL_CONCURRENCY: usize = 2;
 /// Upper bound for the runtime encode-pool knob (matches the worker cap).
 const COVER_CPU_BACKFILL_MAX: usize = 16;
+/// External providers (fanart.tv) get their own low-concurrency HTTP lane so
+/// they can never starve Navidrome cover / getArtistInfo2 fetches (§26).
+const FANART_HTTP_CONCURRENCY: usize = 4;
 
 pub struct CoverCacheState {
     pub root: PathBuf,
@@ -158,6 +184,13 @@ pub struct CoverCacheState {
     pub http_sem: Arc<Semaphore>,
     pub cover_cpu_ui_sem: Arc<Semaphore>,
     pub cover_cpu_backfill_sem: Arc<Semaphore>,
+    /// External-provider (fanart.tv) HTTP lane — separate from `http_sem` so
+    /// external fetches never starve Navidrome cover / getArtistInfo2 (§26).
+    pub fanart_http_sem: Arc<Semaphore>,
+    /// MusicBrainz name→MBID lane — a single permit, so the §19 resolver runs
+    /// strictly serially and the caller's ≥1s spacing keeps us under MB's rate
+    /// limit (their ToS).
+    pub musicbrainz_sem: Arc<Semaphore>,
     /// Live permit count of `cover_cpu_backfill_sem` (the semaphore itself only
     /// exposes *available* permits, not the configured ceiling).
     cover_cpu_backfill_max: AtomicUsize,
@@ -180,6 +213,8 @@ impl CoverCacheState {
             http_sem: Arc::new(Semaphore::new(COVER_HTTP_CONCURRENCY)),
             cover_cpu_ui_sem: Arc::new(Semaphore::new(COVER_CPU_UI_CONCURRENCY)),
             cover_cpu_backfill_sem: Arc::new(Semaphore::new(COVER_CPU_BACKFILL_CONCURRENCY)),
+            fanart_http_sem: Arc::new(Semaphore::new(FANART_HTTP_CONCURRENCY)),
+            musicbrainz_sem: Arc::new(Semaphore::new(1)),
             cover_cpu_backfill_max: AtomicUsize::new(COVER_CPU_BACKFILL_CONCURRENCY),
         })
     }
@@ -229,7 +264,7 @@ impl CoverCacheState {
     ) -> Result<CoverCacheEnsureResult, String> {
         let this = state.lock().await;
         let dir = cover_dir_for_args(&this.root, args);
-        if let Some(path) = peek_tier_path(&dir, args.tier) {
+        if let Some(path) = external_ensure::peek_cover_path(&dir, args.tier, args) {
             return Ok(CoverCacheEnsureResult {
                 hit: true,
                 path: path.to_string_lossy().into_owned(),
@@ -254,6 +289,8 @@ impl CoverCacheState {
         let root = this.root.clone();
         let http_sem = http_sem_override.unwrap_or_else(|| this.http_sem.clone());
         let cover_cpu_sem = this.cpu_sem_for(args.library_bulk);
+        let fanart_sem = this.fanart_http_sem.clone();
+        let musicbrainz_sem = this.musicbrainz_sem.clone();
         drop(this);
 
         if cover_fetch_recently_failed(&dir) {
@@ -262,6 +299,33 @@ impl CoverCacheState {
                 path: String::new(),
                 tier: args.tier,
             });
+        }
+
+        // For an external artist surface (`fanart` 16:9 background or `banner`
+        // strip), try fanart.tv before the Navidrome fallback. On any miss it
+        // falls through WITHOUT writing a `.fetch-failed` marker, so Navidrome
+        // stays the display fallback (§28).
+        if args.external_artwork_enabled && !args.library_bulk && args.cache_kind == "artist" {
+            if let Some(surface) = external_ensure::external_surface(args.surface_kind.as_deref()) {
+                if let Some(path) = external_ensure::try_external_fanart(
+                    app,
+                    args,
+                    &dir,
+                    &client,
+                    &fanart_sem,
+                    &musicbrainz_sem,
+                    args.tier,
+                    surface,
+                )
+                .await
+                {
+                    return Ok(CoverCacheEnsureResult {
+                        hit: true,
+                        path: path.to_string_lossy().into_owned(),
+                        tier: args.tier,
+                    });
+                }
+            }
         }
 
         let requested = args.tier;
@@ -824,6 +888,7 @@ fn peek_tier_path(dir: &Path, want: u32) -> Option<PathBuf> {
     None
 }
 
+
 #[tauri::command]
 pub async fn cover_cache_ensure(
     app: AppHandle,
@@ -923,6 +988,17 @@ pub async fn cover_cache_clear_server(
     }
     invalidate_dir_usage_cache(&server_index_key);
     drop(guard);
+    // §12/B.4: the on-disk external tiers (`{tier}-fanart.webp` / `-banner.webp`)
+    // + `.miss-*` markers went with the dir removal above; also drop the
+    // `artist_artwork_lookup` rows for this server so no resolution state lingers.
+    if let Some(rt) = app.try_state::<LibraryRuntime>() {
+        let store = rt.store.clone();
+        let key = server_index_key.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            psysonic_library::artist_artwork::clear_artist_artwork_for_server(&store, &key)
+        })
+        .await;
+    }
     // Clearing drops files the cheap idle-gate signature can't see, so re-arm
     // the backfill worker — otherwise the next sync-idle would skip the rescan.
     if let Some(worker) = app.try_state::<Arc<CoverBackfillWorker>>() {
@@ -932,6 +1008,65 @@ pub async fn cover_cache_clear_server(
         "cover:cache-cleared",
         serde_json::json!({ "serverIndexKey": server_index_key }),
     );
+    Ok(())
+}
+
+/// Delete only external-provider artifacts under a server's cover dir — the
+/// `{tier}-{provider}.webp` tiers and `.miss-{provider}` markers — leaving the
+/// canonical Navidrome `{tier}.webp` and `.fetch-failed` untouched (Navidrome
+/// tiers have no `-` in the stem; their marker is `.fetch-failed`, not
+/// `.miss-*`). FS-only so it is testable against a real `tempdir`. Returns the
+/// number of files removed.
+fn purge_external_files(server_dir: &Path) -> usize {
+    fn is_external(name: &str) -> bool {
+        (name.ends_with(".webp") && name.contains('-')) || name.starts_with(".miss-")
+    }
+    fn walk(dir: &Path, count: &mut usize) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                walk(&p, count);
+            } else if p.file_name().and_then(|n| n.to_str()).is_some_and(is_external)
+                && std::fs::remove_file(&p).is_ok()
+            {
+                *count += 1;
+            }
+        }
+    }
+    let mut count = 0;
+    walk(server_dir, &mut count);
+    count
+}
+
+/// Opt-out purge (§9, §12, Appendix B.4): drop every external artwork artifact
+/// for a server — `{tier}-{provider}.webp`, `.miss-{provider}`, and the
+/// `artist_artwork_lookup` rows — while leaving the canonical Navidrome covers
+/// intact. Fired when the user turns the External Artwork toggle off. Unlike
+/// `cover_cache_clear_server`, Navidrome tiers survive.
+#[tauri::command]
+pub async fn cover_cache_purge_external(
+    app: AppHandle,
+    server_index_key: String,
+) -> Result<(), String> {
+    let st = state(&app)?;
+    let guard = st.lock().await;
+    let path = cover_server_dir(&guard.root, &server_index_key);
+    if path.is_dir() {
+        purge_external_files(&path);
+    }
+    invalidate_dir_usage_cache(&server_index_key);
+    drop(guard);
+    if let Some(rt) = app.try_state::<LibraryRuntime>() {
+        let store = rt.store.clone();
+        let key = server_index_key.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            psysonic_library::artist_artwork::clear_artist_artwork_for_server(&store, &key)
+        })
+        .await;
+    }
     Ok(())
 }
 
@@ -1214,7 +1349,10 @@ mod tests {
 
     use super::decode_image_bytes;
     use super::disk::{cover_dir, tier_path};
-    use super::{count_cached_cover_ids, is_safe_index_key, merge_cover_bucket, rename_bucket_inner};
+    use super::{
+        count_cached_cover_ids, is_safe_index_key, merge_cover_bucket, purge_external_files,
+        rename_bucket_inner,
+    };
     use psysonic_core::cover_cache_layout::CANONICAL_PROGRESS_TIER;
     use std::fs;
     use std::path::PathBuf;
@@ -1407,6 +1545,35 @@ mod tests {
             fs::read(root.join("new").join("al-2").join("128.webp")).unwrap(),
             b"from-new",
         );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn purge_external_removes_only_external_artifacts() {
+        let root = fresh_tmpdir("purge-external");
+        let entity = root.join("artist").join("ar-1");
+        fs::create_dir_all(&entity).unwrap();
+        // Navidrome canonical — must survive.
+        fs::write(entity.join("2000.webp"), b"n").unwrap();
+        fs::write(entity.join("512.webp"), b"n").unwrap();
+        fs::write(entity.join(".fetch-failed"), b"1").unwrap();
+        // External — must go.
+        fs::write(entity.join("2000-fanart.webp"), b"f").unwrap();
+        fs::write(entity.join("512-fanart.webp"), b"f").unwrap();
+        fs::write(entity.join("2000-banner.webp"), b"b").unwrap();
+        fs::write(entity.join(".miss-fanart"), b"1").unwrap();
+        fs::write(entity.join(".miss-banner"), b"1").unwrap();
+
+        assert_eq!(purge_external_files(&root), 5);
+
+        assert!(entity.join("2000.webp").exists());
+        assert!(entity.join("512.webp").exists());
+        assert!(entity.join(".fetch-failed").exists());
+        assert!(!entity.join("2000-fanart.webp").exists());
+        assert!(!entity.join("512-fanart.webp").exists());
+        assert!(!entity.join("2000-banner.webp").exists());
+        assert!(!entity.join(".miss-fanart").exists());
+        assert!(!entity.join(".miss-banner").exists());
         let _ = fs::remove_dir_all(&root);
     }
 }

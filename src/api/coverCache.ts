@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useAuthStore } from '../store/authStore';
+import { useThemeStore } from '../store/themeStore';
 import { coverIndexKeyFromRef, coverStorageKeyFromRef } from '../cover/storageKeys';
 import { connectBaseUrlForServer } from '../utils/server/serverEndpoint';
 import { serverIndexKeyForProfile } from '../utils/server/serverIndexKey';
@@ -52,7 +53,36 @@ export function setCoverCacheAutoDownloadEnabled(enabled: boolean): void {
   coverAutoDownloadEnabled = enabled;
 }
 
-function ensureArgsFromRef(ref: CoverArtRef, tier: CoverArtTier) {
+export type CoverEnsureOpts = {
+  /** External-artwork surface intent — `'fanart'` for the 16:9 artist background (§28). */
+  surfaceKind?: string;
+  /** §19 name→MusicBrainz context: the artist display name + the album in context. */
+  artistName?: string;
+  albumTitle?: string;
+};
+
+/**
+ * External-artwork ensure fields (§28). `externalArtworkEnabled` is gated by the
+ * master toggle AND restricted to the external artist surfaces (`fanart` /
+ * `banner`), so plain album/artist cover ensures are never affected.
+ */
+function externalEnsureFields(ref: CoverArtRef, opts?: CoverEnsureOpts) {
+  const surfaceKind = opts?.surfaceKind;
+  const isExternalSurface = surfaceKind === 'fanart' || surfaceKind === 'banner';
+  const theme = useThemeStore.getState();
+  const externalArtworkEnabled =
+    isExternalSurface && ref.cacheKind === 'artist' && theme.externalArtworkEnabled;
+  return {
+    externalArtworkEnabled,
+    surfaceKind,
+    artistName: opts?.artistName,
+    albumTitle: opts?.albumTitle,
+    // BYOK personal fanart.tv key (§22), only when the external branch will run.
+    externalArtworkByok: externalArtworkEnabled ? theme.externalArtworkByok : undefined,
+  };
+}
+
+function ensureArgsFromRef(ref: CoverArtRef, tier: CoverArtTier, opts?: CoverEnsureOpts) {
   const { getBaseUrl, getActiveServer } = useAuthStore.getState();
   const scope = ref.serverScope;
   if (scope.kind === 'server') {
@@ -69,6 +99,7 @@ function ensureArgsFromRef(ref: CoverArtRef, tier: CoverArtTier) {
       ),
       username: scope.username,
       password: scope.password,
+      ...externalEnsureFields(ref, opts),
     };
   }
   const server =
@@ -94,6 +125,7 @@ function ensureArgsFromRef(ref: CoverArtRef, tier: CoverArtTier) {
     restBaseUrl: baseUrl ? coverCacheRestHost(baseUrl) : '',
     username: server?.username ?? '',
     password: server?.password ?? '',
+    ...externalEnsureFields(ref, opts),
   };
 }
 
@@ -125,9 +157,10 @@ export async function coverCacheEnsure(
   ref: CoverArtRef,
   tier: CoverArtTier,
   _priority?: string,
+  opts?: CoverEnsureOpts,
 ): Promise<CoverCacheEnsureResult> {
   return invoke<CoverCacheEnsureResult>('cover_cache_ensure', {
-    args: ensureArgsFromRef(ref, tier),
+    args: ensureArgsFromRef(ref, tier, opts),
   });
 }
 
@@ -154,6 +187,23 @@ export async function coverCacheClear(): Promise<void> {
 
 export async function coverCacheClearServer(serverIndexKey: string): Promise<void> {
   return invoke('cover_cache_clear_server', { serverIndexKey });
+}
+
+/**
+ * Opt-out purge: when the External Artwork toggle is turned off, drop every
+ * fetched external image + `.miss-*` marker + lookup row across all configured
+ * servers (Navidrome covers are left intact). Fire-and-forget; per-server
+ * failures are swallowed so one unreachable server can't block the rest.
+ */
+export async function purgeExternalArtworkAllServers(): Promise<void> {
+  const { servers } = useAuthStore.getState();
+  await Promise.all(
+    servers.map(s =>
+      invoke('cover_cache_purge_external', {
+        serverIndexKey: serverIndexKeyForProfile(s),
+      }).catch(() => undefined),
+    ),
+  );
 }
 
 export async function coverCacheStatsServer(

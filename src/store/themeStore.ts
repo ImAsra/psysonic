@@ -43,6 +43,12 @@ interface ThemeState {
   setExpandReplayGain: (v: boolean) => void;
   floatingPlayerBar: boolean;
   setFloatingPlayerBar: (v: boolean) => void;
+  /** Master toggle for external artist artwork (fanart.tv). Off by default (§20). */
+  externalArtworkEnabled: boolean;
+  setExternalArtworkEnabled: (v: boolean) => void;
+  /** Optional personal fanart.tv API key (BYOK) — sent in addition to the app key (§22). */
+  externalArtworkByok: string;
+  setExternalArtworkByok: (v: string) => void;
 }
 
 export function getScheduledTheme(state: Pick<ThemeState, 'enableThemeScheduler' | 'theme' | 'themeDay' | 'themeNight' | 'timeDayStart' | 'timeNightStart'>): string {
@@ -86,6 +92,10 @@ export const useThemeStore = create<ThemeState>()(
       setExpandReplayGain: (v) => set({ expandReplayGain: v }),
       floatingPlayerBar: false,
       setFloatingPlayerBar: (v) => set({ floatingPlayerBar: v }),
+      externalArtworkEnabled: false,
+      setExternalArtworkEnabled: (v) => set({ externalArtworkEnabled: v }),
+      externalArtworkByok: '',
+      setExternalArtworkByok: (v) => set({ externalArtworkByok: v }),
     }),
     {
       name: 'psysonic_theme',
