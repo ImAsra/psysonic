@@ -43,6 +43,9 @@ interface ThemeState {
   setEnablePlaylistCoverPhoto: (v: boolean) => void;
   showBitrate: boolean;
   setShowBitrate: (v: boolean) => void;
+  /** Compact (icon-only) vs. large action/toolbar buttons across detail pages and browse views. */
+  buttonSize: 'large' | 'small';
+  setButtonSize: (v: 'large' | 'small') => void;
   showRemainingTime: boolean;
   setShowRemainingTime: (v: boolean) => void;
   expandReplayGain: boolean;
@@ -102,6 +105,8 @@ export const useThemeStore = create<ThemeState>()(
       setEnablePlaylistCoverPhoto: (v) => set({ enablePlaylistCoverPhoto: v }),
       showBitrate: true,
       setShowBitrate: (v) => set({ showBitrate: v }),
+      buttonSize: 'large',
+      setButtonSize: (v) => set({ buttonSize: v }),
       showRemainingTime: false,
       setShowRemainingTime: (v) => set({ showRemainingTime: v }),
       expandReplayGain: false,

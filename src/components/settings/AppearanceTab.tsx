@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { LayoutGrid, Palette, Sliders, Type, ZoomIn } from 'lucide-react';
+import { LayoutGrid, Maximize2, Palette, Sliders, Type, ZoomIn } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import {
   LIBRARY_GRID_MAX_COLUMNS_MAX,
@@ -301,6 +301,34 @@ export function AppearanceTab() {
                       selected={auth.seekbarStyle === style}
                       onClick={() => auth.setSeekbarStyle(style)}
                     />
+                  ))}
+                </div>
+              </SettingsField>
+            </SettingsSubCard>
+          </SettingsGroup>
+        </div>
+      </SettingsSubSection>
+
+      <SettingsSubSection
+        title={t('settings.buttonSizeTitle')}
+        icon={<Maximize2 size={16} />}
+      >
+        <div className="settings-card">
+          <SettingsGroup>
+            <SettingsSubCard>
+              <SettingsField
+                label={t('settings.buttonSizeLabel')}
+                desc={t('settings.buttonSizeDesc')}
+              >
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {(['large', 'small'] as const).map(size => (
+                    <button
+                      key={size}
+                      className={`btn ${theme.buttonSize === size ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => theme.setButtonSize(size)}
+                    >
+                      {t(`settings.buttonSize_${size}`)}
+                    </button>
                   ))}
                 </div>
               </SettingsField>
