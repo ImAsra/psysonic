@@ -339,6 +339,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * History rows from other servers resolve album/cover metadata per server so Now Playing artwork loads when replaying cross-server plays.
 * Cross-server queue switches now send `playbackReport` **stopped** to the previous server so its Who is listening entry clears promptly.
 
+### Album and artist covers — full resolution restored
+
+**By [@Psychotoxical](https://github.com/Psychotoxical), PR [#1205](https://github.com/Psychotoxical/psysonic/pull/1205)**
+
+* Album and artist covers — and the full-size view when you click a cover — could appear small and low-quality even though the source image was large, depending on how you reached the album. Root cause: the cache built its larger sizes from a smaller already-saved size instead of the full-resolution download, so they were stored downscaled. Covers are now built from the full-resolution image, and the full-size view opens at full resolution. The cover cache refreshes once on update. Reported by users on Discord.
+
 ## Under the Hood
 
 ### ESLint setup and a strict lint pass over the frontend
