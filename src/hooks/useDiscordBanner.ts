@@ -1,6 +1,6 @@
 // src/hooks/useDiscordBanner.ts
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 const STORAGE_KEY = "psysonic_discord_banner_dismissed";
 
@@ -10,12 +10,9 @@ interface UseDiscordBannerReturn {
 }
 
 export function useDiscordBanner(): UseDiscordBannerReturn {
-  const [visible, setVisible] = useState<boolean>(false);
-
-  useEffect(() => {
-    const dismissed = localStorage.getItem(STORAGE_KEY);
-    if (!dismissed) setVisible(true);
-  }, []);
+  const [visible, setVisible] = useState<boolean>(
+    () => localStorage.getItem(STORAGE_KEY) === null
+  );
 
   const dismiss = (permanent: boolean): void => {
     if (permanent) localStorage.setItem(STORAGE_KEY, "1");
