@@ -286,7 +286,7 @@ export function AppShell() {
           )}
         </header>
         <OrbitSessionBar />
-        <DiscordBanner/> 
+        <DiscordBanner/>
         {connStatus === 'disconnected' && (
           <OfflineBanner onRetry={connRetry} isChecking={connRetrying} showSettingsLink={!hasOfflineBrowse} serverName={serverName} />
         )}
