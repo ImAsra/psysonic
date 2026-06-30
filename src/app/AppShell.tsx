@@ -34,9 +34,9 @@ import OfflineBanner from '../components/OfflineBanner';
 import AppUpdater from '../components/AppUpdater';
 import TitleBar from '../components/TitleBar';
 import OrbitSessionBar from '../components/OrbitSessionBar';
-import { DiscordBanner } from '../components/DiscordBanner';
-import { useAccumulatedUsage } from '../hooks/useAccumulatedUsage';
+import DiscordBanner from '../components/DiscordBanner';
 import OrbitStartTrigger from '../components/OrbitStartTrigger';
+import { useAccumulatedUsage } from '../hooks/useAccumulatedUsage';
 import { useOrbitHost } from '../hooks/useOrbitHost';
 import { useOrbitGuest } from '../hooks/useOrbitGuest';
 import { useOrbitBodyAttrs } from '../hooks/useOrbitBodyAttrs';
@@ -286,7 +286,7 @@ export function AppShell() {
           )}
         </header>
         <OrbitSessionBar />
-        <DiscordBanner /> 
+        <DiscordBanner/> 
         {connStatus === 'disconnected' && (
           <OfflineBanner onRetry={connRetry} isChecking={connRetrying} showSettingsLink={!hasOfflineBrowse} serverName={serverName} />
         )}
