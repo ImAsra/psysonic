@@ -24,8 +24,7 @@ import { syncAllServerHttpContexts } from '../utils/server/syncServerHttpContext
 import type { AuthState } from './authStoreTypes';
 import { getCachedConnectBaseUrl } from '../utils/server/serverEndpoint';
 import { serverProfileBaseUrl } from '../utils/server/serverBaseUrl';
-import { createDiscordBannerActions } from './authDiscordBannerActions.ts';
-
+import { createDiscordBannerActions } from './authDiscordBannerActions';
 
 export const useAuthStore = create<AuthState>()(
   persist(
