@@ -23,13 +23,15 @@ function addUsageMs(deltaMs: number): void {
  * Mount once near the app root (e.g. AppShell).
  */
 export function useAccumulatedUsage(): void {
-  const lastTickRef = useRef<number>(Date.now());
+  const lastTickRef = useRef<number | null>(null);
 
   useEffect(() => {
+    lastTickRef.current = Date.now();
+
     const flush = (): void => {
       if (document.visibilityState !== "visible") return;
       const now = Date.now();
-      const delta = now - lastTickRef.current;
+      const delta = now - (lastTickRef.current ?? now);
       lastTickRef.current = now;
       addUsageMs(delta);
     };
