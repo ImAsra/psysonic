@@ -17,10 +17,10 @@ function addUsageMs(deltaMs: number): void {
 }
 
 /**
- * Tracks accumulated foreground usage time across sessions, persisted to
- * localStorage. Only counts time while the document is visible (not
- * minimized/backgrounded) so it reflects actual usage, not idle uptime.
- * Mount once near the app root (e.g. AppShell).
+ * Tracks total accumulated app usage time across sessions, persisted to
+ * localStorage. Counts time for as long as the app process is running,
+ * regardless of window focus/visibility. Mount once near the app root
+ * (e.g. AppShell).
  */
 export function useAccumulatedUsage(): void {
   const lastTickRef = useRef<number | null>(null);
@@ -29,7 +29,6 @@ export function useAccumulatedUsage(): void {
     lastTickRef.current = Date.now();
 
     const flush = (): void => {
-      if (document.visibilityState !== "visible") return;
       const now = Date.now();
       const delta = now - (lastTickRef.current ?? now);
       lastTickRef.current = now;
@@ -38,16 +37,8 @@ export function useAccumulatedUsage(): void {
 
     const interval = window.setInterval(flush, TICK_MS);
 
-    const onVisibilityChange = (): void => {
-      // Reset the tick reference so backgrounded time isn't counted once
-      // visibility returns.
-      lastTickRef.current = Date.now();
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-
     return () => {
       window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 }
