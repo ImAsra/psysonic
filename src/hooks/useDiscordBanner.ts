@@ -4,7 +4,7 @@ import { useState } from "react";
 import { getAccumulatedUsageMs } from "./useAccumulatedUsage";
 
 const DISMISS_KEY = "psysonic_discord_banner_dismissed";
-const USAGE_THRESHOLD_MS = 15 * 60 * 60 * 1000; // 15 hours
+const USAGE_THRESHOLD_MS = 20 * 60 * 60 * 1000; // 20 hours
 interface UseDiscordBannerReturn {
   visible: boolean;
   dismiss: (permanent: boolean) => void;
