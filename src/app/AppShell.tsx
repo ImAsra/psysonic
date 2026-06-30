@@ -35,6 +35,7 @@ import AppUpdater from '../components/AppUpdater';
 import TitleBar from '../components/TitleBar';
 import OrbitSessionBar from '../components/OrbitSessionBar';
 import { DiscordBanner } from '../components/DiscordBanner';
+import { useAccumulatedUsage } from '../hooks/useAccumulatedUsage';
 import OrbitStartTrigger from '../components/OrbitStartTrigger';
 import { useOrbitHost } from '../hooks/useOrbitHost';
 import { useOrbitGuest } from '../hooks/useOrbitGuest';
@@ -94,6 +95,7 @@ export function AppShell() {
   usePlaybackRateOrbitSync();
   useTrayMenuI18n();
   useServerCapabilitiesProbe();
+  useAccumulatedUsage();
   const isFullscreenOpen = usePlayerStore(s => s.isFullscreenOpen);
   const toggleFullscreen = usePlayerStore(s => s.toggleFullscreen);
   const isQueueVisible = usePlayerStore(s => s.isQueueVisible);

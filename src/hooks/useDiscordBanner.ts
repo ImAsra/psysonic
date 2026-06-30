@@ -1,24 +1,24 @@
 // src/hooks/useDiscordBanner.ts
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { getAccumulatedUsageMs } from "./useAccumulatedUsage";
 
-const STORAGE_KEY = "psysonic_discord_banner_dismissed";
-
+const DISMISS_KEY = "psysonic_discord_banner_dismissed";
+const USAGE_THRESHOLD_MS = 15 * 60 * 60 * 1000; // 15 hours
 interface UseDiscordBannerReturn {
   visible: boolean;
   dismiss: (permanent: boolean) => void;
 }
 
 export function useDiscordBanner(): UseDiscordBannerReturn {
-  const [visible, setVisible] = useState<boolean>(false);
-
-  useEffect(() => {
-    const dismissed = localStorage.getItem(STORAGE_KEY);
-    if (!dismissed) setVisible(true);
-  }, []);
+  const [visible, setVisible] = useState<boolean>(() => {
+    const dismissed = localStorage.getItem(DISMISS_KEY) !== null;
+    if (dismissed) return false;
+    return getAccumulatedUsageMs() >= USAGE_THRESHOLD_MS;
+  });
 
   const dismiss = (permanent: boolean): void => {
-    if (permanent) localStorage.setItem(STORAGE_KEY, "1");
+    if (permanent) localStorage.setItem(DISMISS_KEY, "1");
     setVisible(false);
   };
 
