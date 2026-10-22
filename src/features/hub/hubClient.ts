@@ -11,8 +11,20 @@ import {
   fingerprintFromLocalQueue,
   fingerprintFromServer,
   playQueueFingerprintsEqual,
-  pullPlayQueueFromServer,
+  applyServerPlayQueue,
 } from '@/features/playback/store/applyServerPlayQueue';
+import {
+  clearQueueNaturallyEnded,
+  clearQueuePushFailed,
+  resumeIdleQueuePull,
+} from '@/features/playback/store/queuePlaybackIdle';
+import {
+  popQueueRedoSnapshot,
+  popQueueUndoSnapshot,
+  pushQueueRedoSnapshot,
+  pushQueueUndoSnapshot,
+  queueUndoSnapshotFromState,
+} from '@/features/playback/store/queueUndo';
 import { getQueueTracksView } from '@/features/playback/store/queueTrackView';
 import type { Track } from '@/lib/media/trackTypes';
 import {
@@ -88,15 +100,35 @@ let forceLocal = false;
 /** While true, the remote position is not pushed into the shared progress clock. */
 let holdProgress = false;
 
+/**
+ * Like pullPlayQueueFromServer but WITHOUT pushing a queue-undo entry: a device
+ * switch is not a user queue edit, so Ctrl+Z must not roll it back.
+ */
+async function pullQueueForTakeover(serverId: string) {
+  if (!isPlayQueueSyncEnabled()) return 'noop' as const;
+  clearQueueNaturallyEnded();
+  const result = await applyServerPlayQueue(serverId, {
+    mode: 'manual',
+    preferServerPosition: true,
+    pushUndo: false,
+  });
+  if (result === 'applied' || result === 'noop') {
+    resumeIdleQueuePull();
+    clearQueuePushFailed(serverId);
+  }
+  return result;
+}
+
 async function handleTakeover(hubState: HubRemoteState | null, ageMs: number, fresh: boolean) {
   const serverId = useAuthStore.getState().activeServerId;
   if (!serverId) return;
   forceLocal = true;
   try {
-    const result = await pullPlayQueueFromServer(serverId);
+    const result = await pullQueueForTakeover(serverId);
     if (result !== 'applied' && result !== 'noop') return;
     const player = localPlayer();
     setClock(player.currentTime, false); // position the server queue gave us
+    tickGuardUntil = Date.now() + 1500;
 
     // The Subsonic server only has the position the previous device last SAVED.
     // The hub has the exact position it reported when it yielded, so prefer that
@@ -128,12 +160,16 @@ async function handleTakeover(hubState: HubRemoteState | null, ageMs: number, fr
 // mode it carries the other device's position), so we keep our own clock that is
 // only moved by trusted events: real engine ticks, seeks, pause/resume, track changes.
 // ---------------------------------------------------------------------------
-let clock = { sec: 0, at: Date.now(), playing: false };
+// `live` = real engine ticks are flowing. Until the first tick after a resume or seek,
+// the audio may still be loading, so the clock must NOT advance (that was the
+// "few seconds ahead after a quick switch" drift).
+let clock = { sec: 0, at: Date.now(), playing: false, live: false };
+let tickGuardUntil = 0; // ignore stale pre-seek ticks briefly after a seek/handoff
 let emittingMine = false;
 
-const clockNow = () => clock.sec + (clock.playing ? (Date.now() - clock.at) / 1000 : 0);
+const clockNow = () => clock.sec + (clock.playing && clock.live ? (Date.now() - clock.at) / 1000 : 0);
 const setClock = (sec: number, playing = usePlayerStore.getState().isPlaying) => {
-  clock = { sec: Math.max(0, sec), at: Date.now(), playing };
+  clock = { sec: Math.max(0, sec), at: Date.now(), playing, live: false };
 };
 
 /** Write to the shared progress clock (waveform / time display) without feeding it back into ours. */
@@ -190,6 +226,62 @@ async function refreshQueueFromServer() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Shared playback settings (crossfade, AutoDJ, gapless...). The hub keeps the
+// latest values; every device adopts them, so two players can never run with
+// different crossfade/AutoDJ setups during a handoff.
+// ---------------------------------------------------------------------------
+const SYNCED_SETTING_KEYS = [
+  'crossfadeEnabled', 'crossfadeSecs', 'crossfadeTrimSilence',
+  'autodjSmoothSkip', 'autodjOverlapCapMode', 'autodjOverlapCapSec',
+  'gaplessEnabled', 'pauseResumeFadeEnabled', 'pauseResumeFadeSecs',
+  'infiniteQueueEnabled', 'smartShuffleEnabled', 'preservePlayNextOrder',
+] as const;
+type SettingValue = boolean | number | string;
+let lastSynced: Record<string, SettingValue> = {};
+
+function collectSettings(): Record<string, SettingValue> {
+  const a = useAuthStore.getState() as unknown as Record<string, unknown>;
+  const out: Record<string, SettingValue> = {};
+  for (const k of SYNCED_SETTING_KEYS) {
+    const v = a[k];
+    if (typeof v === 'boolean' || typeof v === 'number' || typeof v === 'string') out[k] = v;
+  }
+  return out;
+}
+
+/** Adopt settings from the hub (only known keys, only matching types). */
+function applySharedSettings(values: Record<string, unknown>) {
+  const cur = collectSettings();
+  const patch: Record<string, SettingValue> = {};
+  for (const k of SYNCED_SETTING_KEYS) {
+    const v = values[k];
+    if (v !== undefined && k in cur && typeof v === typeof cur[k] && v !== cur[k]) patch[k] = v as SettingValue;
+  }
+  if (Object.keys(patch).length) useAuthStore.setState(patch as never);
+  lastSynced = collectSettings();
+}
+
+/** On connect: the hub's values win; anything the hub does not have yet is uploaded. */
+function reconcileSettings(fromHub: Record<string, unknown>) {
+  applySharedSettings(fromHub);
+  const local = collectSettings();
+  const missing: Record<string, SettingValue> = {};
+  for (const k of Object.keys(local)) if (!(k in fromHub)) missing[k] = local[k];
+  if (Object.keys(missing).length) hubSender?.({ t: 'settings', values: missing });
+}
+
+function pushSettingsDiff() {
+  if (useHubStore.getState().status !== 'connected') return;
+  const now = collectSettings();
+  const diff: Record<string, SettingValue> = {};
+  for (const k of Object.keys(now)) if (now[k] !== lastSynced[k]) diff[k] = now[k];
+  if (Object.keys(diff).length) {
+    hubSender?.({ t: 'settings', values: diff });
+    lastSynced = now;
+  }
+}
+
 function snapshot(): Record<string, unknown> {
   const p = usePlayerStore.getState();
   const t = p.currentTrack;
@@ -217,7 +309,7 @@ function snapshot(): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 type Action = (...args: any[]) => unknown;
 const ACTIONS = ['togglePlay', 'resume', 'pause', 'next', 'previous', 'seek', 'setVolume', 'playTrack',
-  'toggleShuffleMode', 'toggleRepeat'] as const;
+  'toggleShuffleMode', 'toggleRepeat', 'undoLastQueueEdit', 'redoLastQueueEdit'] as const;
 let originals: Record<string, Action> | null = null;
 
 /** The real local player (bypasses the remote-mode routing). */
@@ -272,6 +364,35 @@ async function remotePlayTrack(track: Track, queue?: Track[]) {
   }
 }
 
+/**
+ * Ctrl+Z / Ctrl+Shift+Z while another device is the active player: restore the
+ * QUEUE only. The app's normal undo can also restart the local audio engine on a
+ * snapshot's old song, which must never happen on a device that is just a remote.
+ */
+function remoteQueueHistory(dir: 'undo' | 'redo'): boolean {
+  const remote = getHubRemote();
+  if (!remote) return false;
+  const prior = usePlayerStore.getState();
+  const snap = dir === 'undo' ? popQueueUndoSnapshot() : popQueueRedoSnapshot();
+  if (!snap) return false;
+  const putBack = () => (dir === 'undo' ? pushQueueUndoSnapshot(snap) : pushQueueRedoSnapshot(snap));
+
+  // The song the active device is playing has to stay in the queue, or it would jump.
+  const tid = remote.state.trackId;
+  let items = [...snap.queueItems];
+  let idx = tid ? items.findIndex(r => r.trackId === tid) : -1;
+  if (tid && idx < 0) {
+    const ref = prior.queueItems.find(r => r.trackId === tid);
+    if (!ref) { putBack(); return false; }
+    items = [ref, ...items];
+    idx = 0;
+  }
+  const current = queueUndoSnapshotFromState(prior);
+  if (dir === 'undo') pushQueueRedoSnapshot(current); else pushQueueUndoSnapshot(current);
+  usePlayerStore.setState({ queueItems: items, queueIndex: Math.max(0, idx) });
+  return true; // the queue subscriber pushes it to the server and tells the other devices
+}
+
 function installRemoteRouting(): () => void {
   const st = usePlayerStore.getState() as unknown as Record<string, Action>;
   const saved: Record<string, Action> = {};
@@ -295,6 +416,8 @@ function installRemoteRouting(): () => void {
       hubCommand('seek', { positionSec: sec });
     },
     playTrack: (track: Track, queue?: Track[]) => { void remotePlayTrack(track, queue); },
+    undoLastQueueEdit: () => remoteQueueHistory('undo'),
+    redoLastQueueEdit: () => remoteQueueHistory('redo'),
     toggleShuffleMode: () => {
       const next = !(getHubRemote()?.state.shuffle ?? false);
       patchRemote({ shuffle: next });
@@ -436,6 +559,9 @@ export function startHubClient(): () => void {
             remoteStateAt: Date.now(),
           });
           sendState();
+          if (useHubStore.getState().syncPlaybackSettings) {
+            reconcileSettings((m.settings ?? {}) as Record<string, unknown>);
+          }
           clearInterval(heartbeat);
           heartbeat = setInterval(() => {
             if (usePlayerStore.getState().isPlaying) sendState();
@@ -457,6 +583,11 @@ export function startHubClient(): () => void {
         }
         case 'queue-changed':
           void refreshQueueFromServer();
+          break;
+        case 'settings':
+          if (useHubStore.getState().syncPlaybackSettings) {
+            applySharedSettings((m.values ?? {}) as Record<string, unknown>);
+          }
           break;
         case 'command':
           applyCommand(String(m.action), m.args ?? null);
@@ -502,8 +633,8 @@ export function startHubClient(): () => void {
     // Keep our clock exact across pause/resume and track changes.
     if (s.isPlaying !== wasPlaying) {
       clock = wasPlaying
-        ? { sec: clockNow(), at: Date.now(), playing: false } // freeze at the true pause position
-        : { sec: clock.sec, at: Date.now(), playing: true };
+        ? { sec: clockNow(), at: Date.now(), playing: false, live: false } // freeze at the true pause position
+        : { sec: clock.sec, at: Date.now(), playing: true, live: false };  // not live until a real tick
       wasPlaying = s.isPlaying;
     }
     if (s.currentTrack?.id !== lastTrackId) {
@@ -526,13 +657,22 @@ export function startHubClient(): () => void {
   // Real engine ticks keep the clock honest (ignoring our own writes).
   const unsubProgress = subscribePlaybackProgress(next => {
     if (emittingMine || getHubRemote()) return;
-    setClock(next.currentTime);
+    if (Date.now() < tickGuardUntil && Math.abs(next.currentTime - clock.sec) > 1.5) return; // stale pre-seek tick
+    clock = { sec: next.currentTime, at: Date.now(), playing: usePlayerStore.getState().isPlaying, live: true };
   });
   // Seeks announce themselves (exact target), so no guessing from position jumps.
   const unsubSeek = subscribePlaybackSeek(sec => {
     setClock(sec);
+    tickGuardUntil = Date.now() + 800;
     clearTimeout(seekTimer);
     seekTimer = setTimeout(() => { if (!gaveUp) sendState(); }, 120); // debounce drags
+  });
+
+  let settingsTimer: ReturnType<typeof setTimeout> | undefined;
+  const unsubAuth = useAuthStore.subscribe(() => {
+    if (!useHubStore.getState().syncPlaybackSettings) return;
+    clearTimeout(settingsTimer);
+    settingsTimer = setTimeout(pushSettingsDiff, 250); // debounce slider drags
   });
 
   const uninstallRouting = installRemoteRouting();
@@ -547,6 +687,8 @@ export function startHubClient(): () => void {
     unsubPlayer();
     unsubSeek();
     unsubProgress();
+    unsubAuth();
+    clearTimeout(settingsTimer);
     clearTimeout(seekTimer);
     clearTimeout(queueTimer);
     teardown();

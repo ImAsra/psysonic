@@ -16,7 +16,7 @@ const STATUS_TEXT: Record<string, string> = {
 
 // POC: plain English strings. Upstream PR will need i18n keys in every locale.
 export function HubSettings() {
-  const { enabled, url, token, deviceName, status, devices, remoteState, deviceId } = useHubStore();
+  const { enabled, url, token, deviceName, status, devices, remoteState, deviceId, syncPlaybackSettings } = useHubStore();
   const set = useHubStore.getState();
 
   return (
@@ -28,6 +28,12 @@ export function HubSettings() {
             ariaLabel="Enable realtime hub"
             checked={enabled}
             onChange={set.setEnabled}
+          />
+          <SettingsToggle
+            desc="Keep crossfade, AutoDJ, gapless and similar playback settings identical on every connected device, so they can't disagree during a handoff."
+            ariaLabel="Sync playback settings"
+            checked={syncPlaybackSettings}
+            onChange={set.setSyncPlaybackSettings}
           />
           <SettingsField label="Hub URL" desc="e.g. http://192.168.1.50:5533 or https://hub.example.com">
             <input className="input" type="text" value={url} onChange={e => set.setUrl(e.target.value)}

@@ -46,6 +46,9 @@ interface HubStore {
   setUrl: (v: string) => void;
   setToken: (v: string) => void;
   setDeviceName: (v: string) => void;
+  /** Keep crossfade / AutoDJ / gapless etc. identical on all devices. */
+  syncPlaybackSettings: boolean;
+  setSyncPlaybackSettings: (v: boolean) => void;
   // runtime only (not persisted)
   status: HubStatus;
   devices: HubDevice[];
@@ -66,10 +69,12 @@ export const useHubStore = create<HubStore>()(
       token: '',
       deviceId: newDeviceId(),
       deviceName: 'Psysonic Desktop',
+      syncPlaybackSettings: true,
       setEnabled: enabled => set({ enabled }),
       setUrl: url => set({ url }),
       setToken: token => set({ token }),
       setDeviceName: deviceName => set({ deviceName }),
+      setSyncPlaybackSettings: syncPlaybackSettings => set({ syncPlaybackSettings }),
       status: 'off',
       devices: [],
       remoteState: null,
@@ -84,6 +89,7 @@ export const useHubStore = create<HubStore>()(
         token: s.token,
         deviceId: s.deviceId,
         deviceName: s.deviceName,
+        syncPlaybackSettings: s.syncPlaybackSettings,
       }),
     },
   ),
