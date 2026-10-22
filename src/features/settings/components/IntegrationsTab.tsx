@@ -17,6 +17,7 @@ import { MusicNetworkSection } from '@/features/settings/components/musicNetwork
 import { purgeExternalAlbumArt, purgeExternalArtworkAllServers } from '@/lib/api/coverCache';
 import { useShareSettingsStore } from '@/features/share';
 import { usePlayQueueSyncSettingsStore } from '@/features/playback';
+import { HubSettings } from '@/features/hub';
 
 export function IntegrationsTab() {
   const { t } = useTranslation();
@@ -105,6 +106,8 @@ export function IntegrationsTab() {
           </SettingsGroup>
         </div>
       </SettingsSubSection>
+
+      <HubSettings />
 
       {/* Music Network — scrobbling + enrichment across multiple services */}
       <MusicNetworkSection />
