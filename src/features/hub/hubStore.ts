@@ -31,6 +31,8 @@ export interface HubRemoteState {
   positionSec?: number;
   playing?: boolean;
   volume?: number;
+  shuffle?: boolean;
+  repeat?: 'off' | 'all' | 'one';
 }
 
 interface HubStore {

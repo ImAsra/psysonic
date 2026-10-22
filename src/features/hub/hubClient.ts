@@ -1,17 +1,28 @@
 import { usePlayerStore } from '@/features/playback/store/playerStore';
 import { useAuthStore } from '@/store/authStore';
-import { flushPlayQueuePosition } from '@/features/playback/store/queueSync';
-import { applyMappedQueue, pullPlayQueueFromServer } from '@/features/playback/store/applyServerPlayQueue';
+import { flushPlayQueuePosition, flushQueueSyncToServer } from '@/features/playback/store/queueSync';
+import { isPlayQueueSyncEnabled } from '@/features/playback/store/playQueueSyncSettingsStore';
+import { getPlayQueueForServer } from '@/lib/api/subsonicPlayQueue';
+import { songToTrack } from '@/lib/media/songToTrack';
+import { resolveServerIdForIndexKey } from '@/lib/server/serverLookup';
+import {
+  applyMappedQueue,
+  applyMappedQueueProjection,
+  fingerprintFromLocalQueue,
+  fingerprintFromServer,
+  playQueueFingerprintsEqual,
+  pullPlayQueueFromServer,
+} from '@/features/playback/store/applyServerPlayQueue';
 import { getQueueTracksView } from '@/features/playback/store/queueTrackView';
 import type { Track } from '@/lib/media/trackTypes';
 import {
   emitPlaybackProgress,
-  getPlaybackProgressSnapshot,
+  subscribePlaybackProgress,
   subscribePlaybackSeek,
 } from '@/features/playback/store/playbackProgress';
 import { useHubStore } from './hubStore';
 import type { HubDevice, HubRemoteState } from './hubStore';
-import { getHubRemote, remotePosition } from './useHubRemote';
+import { getHubRemote, remotePosition, trackFromRemoteState } from './useHubRemote';
 
 /**
  * Optional realtime hub client (psysonic-hub). Does nothing unless the user
@@ -60,7 +71,9 @@ export function hubCommand(action: string, args: Record<string, unknown> | null 
 async function handleYield(to: string, send: (m: unknown) => void) {
   try {
     const p = localPlayer();
-    if (p.isPlaying) p.pause();
+    if (p.isPlaying) p.pause(); // freezes our clock at the true pause position
+    // Make the shared progress clock exact so the saved queue position is right too.
+    emitMine(clockNow(), p.currentTrack?.duration ?? 0, 0);
     await flushPlayQueuePosition();
   } catch (e) {
     console.error('[psysonic-hub] yield failed', e);
@@ -83,6 +96,7 @@ async function handleTakeover(hubState: HubRemoteState | null, ageMs: number, fr
     const result = await pullPlayQueueFromServer(serverId);
     if (result !== 'applied' && result !== 'noop') return;
     const player = localPlayer();
+    setClock(player.currentTime, false); // position the server queue gave us
 
     // The Subsonic server only has the position the previous device last SAVED.
     // The hub has the exact position it reported when it yielded, so prefer that
@@ -92,11 +106,14 @@ async function handleTakeover(hubState: HubRemoteState | null, ageMs: number, fr
         && Number.isFinite(hubState.positionSec) && track.duration > 0) {
       const sec = (hubState.positionSec ?? 0) + (hubState.playing ? Math.max(0, ageMs) / 1000 : 0);
       const target = Math.max(0, Math.min(track.duration - 0.5, sec));
+      setClock(target, false);
       if (Math.abs(target - player.currentTime) > 0.75) {
         player.seek(target / track.duration);
         await new Promise(r => setTimeout(r, 200)); // let the seek settle before resuming
       }
     }
+    markQueueApplied();
+    emitMine(clockNow(), localPlayer().currentTrack?.duration ?? 0, 0);
     localPlayer().resume();
   } catch (e) {
     console.error('[psysonic-hub] takeover failed', e);
@@ -105,13 +122,72 @@ async function handleTakeover(hubState: HubRemoteState | null, ageMs: number, fr
   }
 }
 
-/** Last explicit seek (position known instantly; the engine progress lags behind it). */
-let seekOverride: { sec: number; at: number } | null = null;
+// ---------------------------------------------------------------------------
+// Local playback clock. The position we REPORT must be the true local position.
+// The shared progress snapshot can be stale right after a handoff (and in remote
+// mode it carries the other device's position), so we keep our own clock that is
+// only moved by trusted events: real engine ticks, seeks, pause/resume, track changes.
+// ---------------------------------------------------------------------------
+let clock = { sec: 0, at: Date.now(), playing: false };
+let emittingMine = false;
 
-function currentPosition(playing: boolean): number {
-  const o = seekOverride;
-  if (o && Date.now() - o.at < 1200) return o.sec + (playing ? (Date.now() - o.at) / 1000 : 0);
-  return getPlaybackProgressSnapshot().currentTime;
+const clockNow = () => clock.sec + (clock.playing ? (Date.now() - clock.at) / 1000 : 0);
+const setClock = (sec: number, playing = usePlayerStore.getState().isPlaying) => {
+  clock = { sec: Math.max(0, sec), at: Date.now(), playing };
+};
+
+/** Write to the shared progress clock (waveform / time display) without feeding it back into ours. */
+function emitMine(sec: number, durationSec: number, buffered = 1) {
+  emittingMine = true;
+  try {
+    emitPlaybackProgress({ currentTime: sec, progress: durationSec > 0 ? sec / durationSec : 0, buffered });
+  } finally {
+    emittingMine = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Live queue sync. The queue itself travels through the Subsonic play queue;
+// the hub only says "the queue changed, go look". Whoever edits the queue pushes
+// it to the server right away and signals; the others merge it in WITHOUT touching
+// what is currently playing (projection merge).
+// ---------------------------------------------------------------------------
+let lastAppliedQueue: unknown = null;
+/** Remember the current queue array as "not a user edit" so it is not pushed back. */
+function markQueueApplied() {
+  lastAppliedQueue = usePlayerStore.getState().queueItems;
+}
+
+async function pushQueueAndSignal() {
+  if (!isPlayQueueSyncEnabled() || useHubStore.getState().status !== 'connected') return;
+  const p = usePlayerStore.getState();
+  const remote = getHubRemote();
+  // As a controller, save the ACTIVE device's track/position, not our idle local ones.
+  const current = remote ? trackFromRemoteState(remote.state) : p.currentTrack;
+  const seconds = remote ? remotePosition(remote.state, remote.stateAt) : clockNow();
+  try {
+    await flushQueueSyncToServer(p.queueItems, current, seconds);
+    hubSender?.({ t: 'queue-changed' });
+  } catch (e) {
+    console.error('[psysonic-hub] queue push failed', e);
+  }
+}
+
+async function refreshQueueFromServer() {
+  if (forceLocal || !isPlayQueueSyncEnabled()) return;
+  const serverId = useAuthStore.getState().activeServerId;
+  if (!serverId) return;
+  const profileId = resolveServerIdForIndexKey(serverId) || serverId;
+  try {
+    const q = await getPlayQueueForServer(profileId);
+    if (q.songs.length === 0) return;
+    if (playQueueFingerprintsEqual(fingerprintFromServer(q), fingerprintFromLocalQueue())) return;
+    const mapped = q.songs.map(song => ({ ...songToTrack(song), serverId: profileId }));
+    applyMappedQueueProjection(mapped, q, profileId, false);
+    markQueueApplied();
+  } catch (e) {
+    console.error('[psysonic-hub] queue refresh failed', e);
+  }
 }
 
 function snapshot(): Record<string, unknown> {
@@ -126,9 +202,11 @@ function snapshot(): Record<string, unknown> {
     artistId: t?.artistId,
     coverArt: t?.coverArt,
     durationSec: t?.duration,
-    positionSec: currentPosition(p.isPlaying),
+    positionSec: clockNow(),
     playing: p.isPlaying,
     volume: p.volume,
+    shuffle: p.shuffleMode,
+    repeat: p.repeatMode,
   };
 }
 
@@ -138,7 +216,8 @@ function snapshot(): Record<string, unknown> {
 // device through the hub instead of controlling the local player.
 // ---------------------------------------------------------------------------
 type Action = (...args: any[]) => unknown;
-const ACTIONS = ['togglePlay', 'resume', 'pause', 'next', 'previous', 'seek', 'setVolume', 'playTrack'] as const;
+const ACTIONS = ['togglePlay', 'resume', 'pause', 'next', 'previous', 'seek', 'setVolume', 'playTrack',
+  'toggleShuffleMode', 'toggleRepeat'] as const;
 let originals: Record<string, Action> | null = null;
 
 /** The real local player (bypasses the remote-mode routing). */
@@ -176,6 +255,8 @@ async function remotePlayTrack(track: Track, queue?: Track[]) {
     if (!tracks.some(t => t.id === track.id)) tracks = [track];
     // Silent: replaces the local queue and parks on `track` at 0:00 without audio.
     applyMappedQueue(tracks, { current: track.id, position: 0, songs: [] }, serverId, true, 0);
+    markQueueApplied();
+    emitMine(0, track.duration ?? 0, 0);
     await flushPlayQueuePosition();
     hubSender?.({ t: 'transfer', to: remote.device.id, fresh: true });
     patchRemote({
@@ -214,6 +295,18 @@ function installRemoteRouting(): () => void {
       hubCommand('seek', { positionSec: sec });
     },
     playTrack: (track: Track, queue?: Track[]) => { void remotePlayTrack(track, queue); },
+    toggleShuffleMode: () => {
+      const next = !(getHubRemote()?.state.shuffle ?? false);
+      patchRemote({ shuffle: next });
+      hubCommand('shuffle', { value: next });
+    },
+    toggleRepeat: () => {
+      const order = ['off', 'all', 'one'] as const;
+      const cur = getHubRemote()?.state.repeat ?? 'off';
+      const next = order[(order.indexOf(cur) + 1) % order.length];
+      patchRemote({ repeat: next });
+      hubCommand('repeat', { value: next });
+    },
     setVolume: (v: number) => {
       if (!Number.isFinite(v)) return;
       const vol = Math.min(1, Math.max(0, v));
@@ -236,14 +329,10 @@ function installRemoteRouting(): () => void {
     const r = getHubRemote();
     if (r) {
       wasRemote = true;
-      const dur = r.state.durationSec ?? 0;
-      const pos = remotePosition(r.state, r.stateAt);
-      emitPlaybackProgress({ currentTime: pos, progress: dur > 0 ? pos / dur : 0, buffered: 1 });
+      emitMine(remotePosition(r.state, r.stateAt), r.state.durationSec ?? 0);
     } else if (wasRemote) {
       wasRemote = false;
-      const p = usePlayerStore.getState();
-      const dur = p.currentTrack?.duration ?? 0;
-      emitPlaybackProgress({ currentTime: p.currentTime, progress: dur > 0 ? p.currentTime / dur : 0, buffered: 0 });
+      emitMine(clockNow(), usePlayerStore.getState().currentTrack?.duration ?? 0, 0);
     }
   }, 120);
 
@@ -277,6 +366,15 @@ function applyCommand(action: string, args: Record<string, unknown> | null) {
     case 'volume': {
       const v = Number(args?.volume);
       if (Number.isFinite(v)) p.setVolume(Math.min(1, Math.max(0, v)));
+      return;
+    }
+    case 'shuffle': {
+      if (usePlayerStore.getState().shuffleMode !== (args?.value === true)) p.toggleShuffleMode();
+      return;
+    }
+    case 'repeat': {
+      const want = String(args?.value);
+      for (let i = 0; i < 3 && usePlayerStore.getState().repeatMode !== want; i++) p.toggleRepeat();
       return;
     }
   }
@@ -346,8 +444,19 @@ export function startHubClient(): () => void {
         case 'devices':
           setRuntime({ devices: m.devices as HubDevice[] });
           break;
-        case 'state':
+        case 'state': {
           setRuntime({ remoteState: m.state as HubRemoteState, remoteStateAt: Date.now() });
+          // Controller: keep the queue panel highlighting what the active device plays.
+          const tid = (m.state as HubRemoteState).trackId;
+          if (tid && getHubRemote()) {
+            const ps = usePlayerStore.getState();
+            const idx = ps.queueItems.findIndex(r => r.trackId === tid);
+            if (idx >= 0 && idx !== ps.queueIndex) usePlayerStore.setState({ queueIndex: idx });
+          }
+          break;
+        }
+        case 'queue-changed':
+          void refreshQueueFromServer();
           break;
         case 'command':
           applyCommand(String(m.action), m.args ?? null);
@@ -385,16 +494,43 @@ export function startHubClient(): () => void {
 
   // Push state on meaningful changes only (not on every progress tick).
   let lastKey = '';
+  let wasPlaying = usePlayerStore.getState().isPlaying;
+  let lastTrackId = usePlayerStore.getState().currentTrack?.id;
   let seekTimer: ReturnType<typeof setTimeout> | undefined;
-  const unsubPlayer = usePlayerStore.subscribe(s => {
-    const key = `${s.currentTrack?.id ?? ''}|${s.isPlaying}|${s.volume}`;
-    if (key === lastKey) return;
-    lastKey = key;
-    if (!gaveUp) sendState();
+  let queueTimer: ReturnType<typeof setTimeout> | undefined;
+  const unsubPlayer = usePlayerStore.subscribe((s, prev) => {
+    // Keep our clock exact across pause/resume and track changes.
+    if (s.isPlaying !== wasPlaying) {
+      clock = wasPlaying
+        ? { sec: clockNow(), at: Date.now(), playing: false } // freeze at the true pause position
+        : { sec: clock.sec, at: Date.now(), playing: true };
+      wasPlaying = s.isPlaying;
+    }
+    if (s.currentTrack?.id !== lastTrackId) {
+      lastTrackId = s.currentTrack?.id;
+      setClock(s.currentTime, s.isPlaying);
+    }
+
+    const key = `${s.currentTrack?.id ?? ''}|${s.isPlaying}|${s.volume}|${s.shuffleMode}|${s.repeatMode}`;
+    if (key !== lastKey) {
+      lastKey = key;
+      if (!gaveUp) sendState();
+    }
+
+    // A real queue edit (not one we applied from the server): push + signal the others.
+    if (s.queueItems !== prev.queueItems && s.queueItems !== lastAppliedQueue && !forceLocal) {
+      clearTimeout(queueTimer);
+      queueTimer = setTimeout(() => { void pushQueueAndSignal(); }, 400);
+    }
+  });
+  // Real engine ticks keep the clock honest (ignoring our own writes).
+  const unsubProgress = subscribePlaybackProgress(next => {
+    if (emittingMine || getHubRemote()) return;
+    setClock(next.currentTime);
   });
   // Seeks announce themselves (exact target), so no guessing from position jumps.
   const unsubSeek = subscribePlaybackSeek(sec => {
-    seekOverride = { sec, at: Date.now() };
+    setClock(sec);
     clearTimeout(seekTimer);
     seekTimer = setTimeout(() => { if (!gaveUp) sendState(); }, 120); // debounce drags
   });
@@ -410,7 +546,9 @@ export function startHubClient(): () => void {
     unsubSettings();
     unsubPlayer();
     unsubSeek();
+    unsubProgress();
     clearTimeout(seekTimer);
+    clearTimeout(queueTimer);
     teardown();
   };
 }

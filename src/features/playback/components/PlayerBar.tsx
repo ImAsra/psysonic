@@ -58,7 +58,7 @@ export default function PlayerBar() {
   const {
     currentTrack: localTrack, currentRadio, isPlaying: localPlaying, volume: localVolume,
     togglePlay, next, previous, setVolume,
-    stop, toggleRepeat, repeatMode, toggleShuffleMode, shuffleMode, toggleFullscreen,
+    stop, toggleRepeat, repeatMode: localRepeat, toggleShuffleMode, shuffleMode: localShuffle, toggleFullscreen,
     networkLoved, toggleNetworkLove,
     starredOverrides,
     userRatingOverrides,
@@ -92,11 +92,12 @@ export default function PlayerBar() {
   const currentTrack = hubRemote?.track ?? localTrack;
   const isPlaying = hubRemote ? hubRemote.state.playing === true : localPlaying;
   const volume = hubRemote && typeof hubRemote.state.volume === 'number' ? hubRemote.state.volume : localVolume;
+  const repeatMode = hubRemote?.state.repeat ?? localRepeat;
+  const shuffleMode = hubRemote?.state.shuffle ?? localShuffle;
   const enrichmentPrimaryId = useAuthStore(s => s.enrichmentPrimaryId);
   const floatingPlayerBar = useThemeStore(s => s.floatingPlayerBar);
   const playerBarRef = useRef<HTMLElement>(null);
   const perfFlags = usePerfProbeFlags();
-
   const floatingStyle = useFloatingPlayerBar(playerBarRef, floatingPlayerBar);
 
   const {

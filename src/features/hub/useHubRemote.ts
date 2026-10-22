@@ -17,6 +17,21 @@ type Snap = {
   remoteStateAt: number;
 };
 
+/** Build a Track-like object from what another device reported. */
+export function trackFromRemoteState(st: HubRemoteState): Track | null {
+  if (!st.trackId) return null;
+  return {
+    id: st.trackId,
+    title: st.title ?? '',
+    artist: st.artist ?? '',
+    album: st.album ?? '',
+    albumId: st.albumId ?? '',
+    artistId: st.artistId,
+    duration: st.durationSec ?? 0,
+    coverArt: st.coverArt,
+  };
+}
+
 /** Non-null while ANOTHER device is the active player (Spotify Connect style). */
 export function selectHubRemote(s: Snap): HubRemote | null {
   if (s.status !== 'connected') return null;
