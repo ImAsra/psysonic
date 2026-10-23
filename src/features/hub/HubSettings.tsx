@@ -30,8 +30,8 @@ export function HubSettings() {
             onChange={set.setEnabled}
           />
           <SettingsToggle
-            desc="Keep crossfade, AutoDJ, gapless and similar playback settings identical on every connected device, so they can't disagree during a handoff."
-            ariaLabel="Sync playback settings"
+            desc="Keep settings identical on every connected device. Which kinds of settings are shared (playback, volume normalization, lyrics, appearance, equalizer, keybindings) is chosen on the hub's web page."
+            ariaLabel="Sync settings with the hub"
             checked={syncPlaybackSettings}
             onChange={set.setSyncPlaybackSettings}
           />

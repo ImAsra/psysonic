@@ -35,6 +35,7 @@ import {
 import { useHubStore } from './hubStore';
 import type { HubDevice, HubRemoteState } from './hubStore';
 import { getHubRemote, remotePosition, trackFromRemoteState } from './useHubRemote';
+import { createSettingsSync } from './hubSettingsSync';
 
 /**
  * Optional realtime hub client (psysonic-hub). Does nothing unless the user
@@ -223,62 +224,6 @@ async function refreshQueueFromServer() {
     markQueueApplied();
   } catch (e) {
     console.error('[psysonic-hub] queue refresh failed', e);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Shared playback settings (crossfade, AutoDJ, gapless...). The hub keeps the
-// latest values; every device adopts them, so two players can never run with
-// different crossfade/AutoDJ setups during a handoff.
-// ---------------------------------------------------------------------------
-const SYNCED_SETTING_KEYS = [
-  'crossfadeEnabled', 'crossfadeSecs', 'crossfadeTrimSilence',
-  'autodjSmoothSkip', 'autodjOverlapCapMode', 'autodjOverlapCapSec',
-  'gaplessEnabled', 'pauseResumeFadeEnabled', 'pauseResumeFadeSecs',
-  'infiniteQueueEnabled', 'smartShuffleEnabled', 'preservePlayNextOrder',
-] as const;
-type SettingValue = boolean | number | string;
-let lastSynced: Record<string, SettingValue> = {};
-
-function collectSettings(): Record<string, SettingValue> {
-  const a = useAuthStore.getState() as unknown as Record<string, unknown>;
-  const out: Record<string, SettingValue> = {};
-  for (const k of SYNCED_SETTING_KEYS) {
-    const v = a[k];
-    if (typeof v === 'boolean' || typeof v === 'number' || typeof v === 'string') out[k] = v;
-  }
-  return out;
-}
-
-/** Adopt settings from the hub (only known keys, only matching types). */
-function applySharedSettings(values: Record<string, unknown>) {
-  const cur = collectSettings();
-  const patch: Record<string, SettingValue> = {};
-  for (const k of SYNCED_SETTING_KEYS) {
-    const v = values[k];
-    if (v !== undefined && k in cur && typeof v === typeof cur[k] && v !== cur[k]) patch[k] = v as SettingValue;
-  }
-  if (Object.keys(patch).length) useAuthStore.setState(patch as never);
-  lastSynced = collectSettings();
-}
-
-/** On connect: the hub's values win; anything the hub does not have yet is uploaded. */
-function reconcileSettings(fromHub: Record<string, unknown>) {
-  applySharedSettings(fromHub);
-  const local = collectSettings();
-  const missing: Record<string, SettingValue> = {};
-  for (const k of Object.keys(local)) if (!(k in fromHub)) missing[k] = local[k];
-  if (Object.keys(missing).length) hubSender?.({ t: 'settings', values: missing });
-}
-
-function pushSettingsDiff() {
-  if (useHubStore.getState().status !== 'connected') return;
-  const now = collectSettings();
-  const diff: Record<string, SettingValue> = {};
-  for (const k of Object.keys(now)) if (now[k] !== lastSynced[k]) diff[k] = now[k];
-  if (Object.keys(diff).length) {
-    hubSender?.({ t: 'settings', values: diff });
-    lastSynced = now;
   }
 }
 
@@ -520,6 +465,12 @@ export function startHubClient(): () => void {
   hubSender = send;
   const sendState = () => send({ t: 'state', state: snapshot() });
 
+  const settingsSync = createSettingsSync({
+    send,
+    isConnected: () => useHubStore.getState().status === 'connected' && ws?.readyState === WebSocket.OPEN,
+    isEnabled: () => useHubStore.getState().syncPlaybackSettings,
+  });
+
   const teardown = () => {
     clearTimeout(retryTimer);
     clearInterval(heartbeat);
@@ -559,9 +510,10 @@ export function startHubClient(): () => void {
             remoteStateAt: Date.now(),
           });
           sendState();
-          if (useHubStore.getState().syncPlaybackSettings) {
-            reconcileSettings((m.settings ?? {}) as Record<string, unknown>);
-          }
+          settingsSync.onWelcome(
+            (m.settings ?? {}) as Record<string, Record<string, unknown>>,
+            (m.syncConfig ?? {}) as Record<string, boolean>,
+          );
           clearInterval(heartbeat);
           heartbeat = setInterval(() => {
             if (usePlayerStore.getState().isPlaying) sendState();
@@ -585,9 +537,10 @@ export function startHubClient(): () => void {
           void refreshQueueFromServer();
           break;
         case 'settings':
-          if (useHubStore.getState().syncPlaybackSettings) {
-            applySharedSettings((m.values ?? {}) as Record<string, unknown>);
-          }
+          settingsSync.onSettings(String(m.category), (m.value ?? {}) as Record<string, unknown>);
+          break;
+        case 'sync-config':
+          settingsSync.onConfig((m.config ?? {}) as Record<string, boolean>);
           break;
         case 'command':
           applyCommand(String(m.action), m.args ?? null);
@@ -615,6 +568,7 @@ export function startHubClient(): () => void {
 
   // Reconnect when the user edits settings.
   const unsubSettings = useHubStore.subscribe((s, prev) => {
+    if (s.syncPlaybackSettings !== prev.syncPlaybackSettings) settingsSync.refresh();
     if (s.enabled !== prev.enabled || s.url !== prev.url || s.token !== prev.token
         || s.deviceName !== prev.deviceName) {
       gaveUp = false;
@@ -668,13 +622,6 @@ export function startHubClient(): () => void {
     seekTimer = setTimeout(() => { if (!gaveUp) sendState(); }, 120); // debounce drags
   });
 
-  let settingsTimer: ReturnType<typeof setTimeout> | undefined;
-  const unsubAuth = useAuthStore.subscribe(() => {
-    if (!useHubStore.getState().syncPlaybackSettings) return;
-    clearTimeout(settingsTimer);
-    settingsTimer = setTimeout(pushSettingsDiff, 250); // debounce slider drags
-  });
-
   const uninstallRouting = installRemoteRouting();
 
   connect();
@@ -687,8 +634,7 @@ export function startHubClient(): () => void {
     unsubPlayer();
     unsubSeek();
     unsubProgress();
-    unsubAuth();
-    clearTimeout(settingsTimer);
+    settingsSync.dispose();
     clearTimeout(seekTimer);
     clearTimeout(queueTimer);
     teardown();
