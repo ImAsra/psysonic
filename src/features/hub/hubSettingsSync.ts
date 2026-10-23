@@ -1,5 +1,6 @@
 import { useAuthStore } from '@/store/authStore';
 import { useThemeStore } from '@/store/themeStore';
+import { useInstalledThemesStore } from '@/store/installedThemesStore';
 import { useEqStore } from '@/store/eqStore';
 import { useKeybindingsStore } from '@/store/keybindingsStore';
 import { audioSetEq } from '@/lib/api/audio';
@@ -82,14 +83,44 @@ const LYRICS_KEYS = [
   'lyricsTranslationEnabled', 'lyricsWordHighlightMode', 'sidebarLyricsStyle',
 ] as const;
 
-const APPEARANCE_KEYS = [
+// Appearance is one category made of several stores. NOT shared on purpose: interface scale,
+// font, library card grid size, button size and the custom title bar (screen / OS dependent).
+const THEME_KEYS = [
   'theme', 'followDesktopTheme', 'enableThemeScheduler', 'schedulerMode', 'themeDay', 'themeNight',
-  'timeDayStart', 'timeNightStart', 'enableCoverArtBackground', 'showBitrate', 'showExplicitBadges',
-  'blurExplicitCovers', 'showCardTooltips', 'trackRowPlayClick', 'buttonSize', 'showRemainingTime',
-  'floatingPlayerBar', 'squareCorners',
+  'timeDayStart', 'timeNightStart', 'enableCoverArtBackground', 'enablePlaylistCoverPhoto',
+  'trackListCoverArtOnPages', 'showBitrate', 'showExplicitBadges', 'blurExplicitCovers',
+  'showCardTooltips', 'trackRowPlayClick', 'showRemainingTime', 'floatingPlayerBar', 'squareCorners',
+] as const;
+
+const APPEARANCE_AUTH_KEYS = [
+  'queueTrackListCovers', 'showArtistImages', 'showOrbitTrigger', 'preloadMiniPlayer',
+  'windowButtonStyle', 'showMinimizeButton', 'fullscreenPlayerStyle', 'fullscreenAutoOpenMinutes',
+  'seekbarStyle',
 ] as const;
 
 const EQ_KEYS = ['gains', 'enabled', 'preGain', 'activePreset', 'customPresets'] as const;
+
+/** One category made of several stores; the value is { partName: {...keys} }. */
+function composite(id: string, parts: Array<{ name: string; cat: Category }>): Category {
+  return {
+    id,
+    subscribe: l => {
+      const unsubs = parts.map(p => p.cat.subscribe(l));
+      return () => unsubs.forEach(u => u());
+    },
+    read: () => Object.fromEntries(parts.map(p => [p.name, p.cat.read()])),
+    apply(value) {
+      for (const p of parts) {
+        const sub = value[p.name];
+        if (sub && typeof sub === 'object' && !Array.isArray(sub)) p.cat.apply(sub as Json);
+      }
+    },
+  };
+}
+
+/** A theme may be adopted only if this device has it (built-in or installed); otherwise keep ours. */
+const themeAvailable = (v: unknown) =>
+  typeof v === 'string' && (isBuiltinThemeId(v) || useInstalledThemesStore.getState().isInstalled(v));
 
 const auth = useAuthStore as unknown as StoreLike;
 
@@ -97,10 +128,15 @@ const CATEGORIES: Category[] = [
   keyed('playback', auth, PLAYBACK_KEYS),
   keyed('loudness', auth, LOUDNESS_KEYS),
   keyed('lyrics', auth, LYRICS_KEYS),
-  keyed('appearance', useThemeStore as unknown as StoreLike, APPEARANCE_KEYS, {
-    // A custom theme another device has not installed must not be selected here.
-    accept: (k, v) => !['theme', 'themeDay', 'themeNight'].includes(k) || (typeof v === 'string' && isBuiltinThemeId(v)),
-  }),
+  composite('appearance', [
+    {
+      name: 'theme',
+      cat: keyed('appearance.theme', useThemeStore as unknown as StoreLike, THEME_KEYS, {
+        accept: (k, v) => !['theme', 'themeDay', 'themeNight'].includes(k) || themeAvailable(v),
+      }),
+    },
+    { name: 'app', cat: keyed('appearance.app', auth, APPEARANCE_AUTH_KEYS) },
+  ]),
   keyed('eq', useEqStore as unknown as StoreLike, EQ_KEYS, {
     // Setting the store directly does not reach the audio engine, so push it too.
     after: s => { audioSetEq({ gains: s.gains, enabled: s.enabled, preGain: s.preGain }).catch(() => {}); },
