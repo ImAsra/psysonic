@@ -37,10 +37,16 @@ export function useMiniSync({ onSync, onProgress, onEnded }: Args) {
       if (hiddenRef.current || window.__psyHidden) return;
       onProgress(e.payload.current_time, e.payload.duration);
     });
+    // While another device plays (hub) the main window feeds the position instead.
+    const unHubProgress = listen<ProgressPayload>('mini:hub-progress', (e) => {
+      if (hiddenRef.current || window.__psyHidden) return;
+      onProgress(e.payload.current_time, e.payload.duration);
+    });
     const unEnded = listen('audio:ended', () => onEnded());
     return () => {
       unSync.then(fn => fn()).catch(() => {});
       unProgress.then(fn => fn()).catch(() => {});
+      unHubProgress.then(fn => fn()).catch(() => {});
       unEnded.then(fn => fn()).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

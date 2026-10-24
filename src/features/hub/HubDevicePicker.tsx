@@ -11,7 +11,7 @@ const KIND_ICON = { desktop: Monitor, phone: Smartphone, web: Globe } as const;
  * Only renders while connected to a hub. Picking a device moves playback there;
  * the hub makes sure only one device plays at a time.
  */
-export function HubDevicePicker() {
+export function HubDevicePicker({ className, iconSize = 15 }: { className?: string; iconSize?: number } = {}) {
   const status = useHubStore(s => s.status);
   const devices = useHubStore(s => s.devices);
   const myId = useHubStore(s => s.deviceId);
@@ -28,14 +28,14 @@ export function HubDevicePicker() {
       <button
         ref={btnRef}
         type="button"
-        className={`player-btn player-btn-sm${open ? ' active' : ''}`}
+        className={`${className ?? 'player-btn player-btn-sm'}${open ? ' active' : ''}`}
         onClick={toggleOpen}
         aria-label="Play on a device"
         aria-expanded={open}
         data-tooltip={elsewhere ? `Playing on ${active!.name}` : 'Play on a device'}
         style={elsewhere ? { color: 'var(--accent)' } : undefined}
       >
-        <MonitorSpeaker size={15} />
+        <MonitorSpeaker size={iconSize} />
       </button>
 
       {open && createPortal(

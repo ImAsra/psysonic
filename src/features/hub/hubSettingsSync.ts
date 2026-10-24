@@ -24,8 +24,8 @@ interface Category {
 }
 
 interface StoreLike {
-  getState(): any;
-  setState(partial: any): void;
+  getState(): Record<string, unknown>;
+  setState(partial: Record<string, unknown>): void;
   subscribe(listener: () => void): () => void;
 }
 
@@ -38,7 +38,7 @@ function keyed(
   id: string,
   store: StoreLike,
   keys: readonly string[],
-  opts: { accept?: (key: string, value: unknown) => boolean; after?: (state: any) => void } = {},
+  opts: { accept?: (key: string, value: unknown) => boolean; after?: (state: Record<string, unknown>) => void } = {},
 ): Category {
   return {
     id,
@@ -139,7 +139,9 @@ const CATEGORIES: Category[] = [
   ]),
   keyed('eq', useEqStore as unknown as StoreLike, EQ_KEYS, {
     // Setting the store directly does not reach the audio engine, so push it too.
-    after: s => { audioSetEq({ gains: s.gains, enabled: s.enabled, preGain: s.preGain }).catch(() => {}); },
+    after: s => {
+      audioSetEq({ gains: s.gains as number[], enabled: s.enabled as boolean, preGain: s.preGain as number }).catch(() => {});
+    },
   }),
   {
     id: 'keybindings',

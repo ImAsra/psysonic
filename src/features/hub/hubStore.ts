@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { Track } from '@/lib/media/trackTypes';
 
 export type HubStatus =
   | 'off'
@@ -35,6 +36,21 @@ export interface HubRemoteState {
   repeat?: 'off' | 'all' | 'one';
 }
 
+/** Build a Track-like object from what another device reported. */
+export function trackFromRemoteState(st: HubRemoteState): Track | null {
+  if (!st.trackId) return null;
+  return {
+    id: st.trackId,
+    title: st.title ?? '',
+    artist: st.artist ?? '',
+    album: st.album ?? '',
+    albumId: st.albumId ?? '',
+    artistId: st.artistId,
+    duration: st.durationSec ?? 0,
+    coverArt: st.coverArt,
+  };
+}
+
 interface HubStore {
   // persisted settings
   enabled: boolean;
@@ -55,6 +71,8 @@ interface HubStore {
   remoteState: HubRemoteState | null;
   /** Local receive time of remoteState (ms), used to extrapolate position. */
   remoteStateAt: number;
+  /** remoteState as a Track; keeps its identity while the track itself is unchanged. */
+  remoteTrack: Track | null;
   setRuntime: (p: Partial<Pick<HubStore, 'status' | 'devices' | 'remoteState' | 'remoteStateAt'>>) => void;
 }
 
@@ -79,7 +97,13 @@ export const useHubStore = create<HubStore>()(
       devices: [],
       remoteState: null,
       remoteStateAt: 0,
-      setRuntime: p => set(p),
+      remoteTrack: null,
+      setRuntime: p => set(s => {
+        if (!('remoteState' in p)) return p;
+        const t = p.remoteState ? trackFromRemoteState(p.remoteState) : null;
+        const same = !!s.remoteTrack && !!t && JSON.stringify(s.remoteTrack) === JSON.stringify(t);
+        return { ...p, remoteTrack: same ? s.remoteTrack : t };
+      }),
     }),
     {
       name: 'psysonic_hub_settings',

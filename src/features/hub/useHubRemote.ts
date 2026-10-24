@@ -1,7 +1,7 @@
-import { useMemo } from 'react';
-import type { Track } from '@/lib/media/trackTypes';
-import { useHubStore } from './hubStore';
+import { useHubStore, trackFromRemoteState } from './hubStore';
 import type { HubDevice, HubRemoteState } from './hubStore';
+
+export { trackFromRemoteState };
 
 export interface HubRemote {
   device: HubDevice;
@@ -16,21 +16,6 @@ type Snap = {
   remoteState: HubRemoteState | null;
   remoteStateAt: number;
 };
-
-/** Build a Track-like object from what another device reported. */
-export function trackFromRemoteState(st: HubRemoteState): Track | null {
-  if (!st.trackId) return null;
-  return {
-    id: st.trackId,
-    title: st.title ?? '',
-    artist: st.artist ?? '',
-    album: st.album ?? '',
-    albumId: st.albumId ?? '',
-    artistId: st.artistId,
-    duration: st.durationSec ?? 0,
-    coverArt: st.coverArt,
-  };
-}
 
 /** Non-null while ANOTHER device is the active player (Spotify Connect style). */
 export function selectHubRemote(s: Snap): HubRemote | null {
@@ -61,23 +46,7 @@ export function useHubRemote() {
   const remoteStateAt = useHubStore(s => s.remoteStateAt);
   const remote = selectHubRemote({ status, devices, deviceId, remoteState, remoteStateAt });
 
-  const st = remote?.state;
-  const track = useMemo<Track | null>(
-    () => st?.trackId
-      ? {
-          id: st.trackId,
-          title: st.title ?? '',
-          artist: st.artist ?? '',
-          album: st.album ?? '',
-          albumId: st.albumId ?? '',
-          artistId: st.artistId,
-          duration: st.durationSec ?? 0,
-          coverArt: st.coverArt,
-        }
-      : null,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [st?.trackId, st?.title, st?.artist, st?.album, st?.albumId, st?.artistId, st?.durationSec, st?.coverArt],
-  );
+  const remoteTrack = useHubStore(s => s.remoteTrack);
 
-  return remote ? { ...remote, track } : null;
+  return remote ? { ...remote, track: remoteTrack } : null;
 }

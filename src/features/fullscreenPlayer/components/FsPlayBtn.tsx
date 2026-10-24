@@ -1,3 +1,4 @@
+import { useViewPlaying } from '@/features/hub';
 import React, { memo, useRef } from 'react';
 import { Moon, Pause, Play, Sunrise } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -14,7 +15,7 @@ export const FsPlayBtn = memo(function FsPlayBtn({
   controlsAnchorRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useTranslation();
-  const isPlaying  = usePlayerStore(s => s.isPlaying);
+  const isPlaying  = useViewPlaying();
   const togglePlay = usePlayerStore(s => s.togglePlay);
   const { delayModalOpen, setDelayModalOpen, playPauseBind } = usePlaybackDelayPress(togglePlay);
   const playSlotRef = useRef<HTMLSpanElement>(null);

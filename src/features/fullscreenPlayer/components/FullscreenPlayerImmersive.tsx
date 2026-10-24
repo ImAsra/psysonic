@@ -1,3 +1,4 @@
+import { HubDevicePicker, useViewTrack, useViewRepeat } from '@/features/hub';
 import { queueSongStar, playbackCoverArtForAlbum, usePlayerStore, usePlaybackLibraryNavigate, TrackArtistLinks, ScrobbleActionButton, skipToNextAlbum, skipToPreviousAlbum, albumSkipTooltip } from '@/features/playback';
 import { usePlaybackCoverArt } from '@/cover/usePlaybackCoverArt';
 import { useAlbumCoverRef } from '@/cover/useLibraryCoverRef';
@@ -39,9 +40,9 @@ interface FullscreenPlayerProps {
 export default function FullscreenPlayer({ onClose }: FullscreenPlayerProps) {
   const { t } = useTranslation();
   const navigatePlaybackLibrary = usePlaybackLibraryNavigate();
-  const currentTrack       = usePlayerStore(s => s.currentTrack);
+  const currentTrack       = useViewTrack();
   const resolvedStreamFormat = usePlayerStore(s => s.resolvedStreamFormat);
-  const repeatMode         = usePlayerStore(s => s.repeatMode);
+  const repeatMode         = useViewRepeat();
   const next               = usePlayerStore(s => s.next);
   const previous           = usePlayerStore(s => s.previous);
   const stop               = usePlayerStore(s => s.stop);
@@ -275,6 +276,7 @@ export default function FullscreenPlayer({ onClose }: FullscreenPlayerProps) {
           >
             {repeatMode === 'one' ? <Repeat1 size={14} /> : <Repeat size={14} />}
           </button>
+          <HubDevicePicker className="fs-btn fs-btn-sm" iconSize={14} />
           {currentTrack && (
             <button
               className={`fs-btn fs-btn-sm fs-btn-heart${isStarred ? ' active' : ''}`}

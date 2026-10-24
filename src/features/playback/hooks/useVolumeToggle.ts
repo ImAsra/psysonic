@@ -1,3 +1,4 @@
+import { useViewVolume } from '@/features/hub';
 import { useCallback, useEffect, useRef } from 'react';
 import { usePlayerStore } from '../store/playerStore';
 
@@ -8,7 +9,7 @@ import { usePlayerStore } from '../store/playerStore';
  * still restores a sensible level instead of a stale one.
  */
 export function useVolumeToggle() {
-  const volume = usePlayerStore(s => s.volume);
+  const volume = useViewVolume(); // the active device's volume while another device plays (hub)
   const setVolume = usePlayerStore(s => s.setVolume);
 
   const lastNonZeroRef = useRef(volume > 0 ? volume : 1);

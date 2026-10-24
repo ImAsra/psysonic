@@ -5,6 +5,7 @@ import { Blend, Infinity as InfinityIcon, ListMusic, MoveRight, Shuffle, Volume2
 import type { TFunction } from 'i18next';
 import type { MiniSyncPayload } from '@/features/miniPlayer/utils/miniPlayerBridge';
 import { getTransitionMode } from '@/features/playback/utils/playback/playbackTransition';
+import { MiniDevicePicker } from '@/features/miniPlayer/components/MiniDevicePicker';
 
 interface Props {
   state: MiniSyncPayload;
@@ -106,6 +107,8 @@ export function MiniToolbar({
       >
         <Shuffle size={13} />
       </button>
+
+      {state.hub && <MiniDevicePicker hub={state.hub} />}
 
       <span className="mini-player__toolbar-sep" aria-hidden />
 

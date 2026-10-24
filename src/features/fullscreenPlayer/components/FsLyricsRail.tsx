@@ -1,3 +1,4 @@
+import { useViewTrack } from '@/features/hub';
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   getSmoothPlaybackTime,
@@ -84,7 +85,7 @@ export const FsLyricsRail = memo(function FsLyricsRail({ currentTrack }: { curre
     // stay unhighlighted until playback resumes.
   }, [hasSynced, currentTrack?.id]);
 
-  const duration = usePlayerStore(s => s.currentTrack?.duration ?? 0);
+  const duration = useViewTrack()?.duration ?? 0;
   const seek     = usePlayerStore(s => s.seek);
 
   const slotH = useRef(window.innerHeight * 0.06);

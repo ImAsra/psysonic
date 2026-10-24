@@ -8,10 +8,17 @@ import { resolveQueueTrack } from '@/features/playback/store/queueTrackView';
 import type { SubsonicOpenArtistRef } from '@/lib/api/subsonicTypes';
 import { showMainWindow } from '@/lib/api/miniPlayer';
 import { toMini, type MiniTrackInfo } from '@/features/miniPlayer/utils/miniTrackInfo';
+import { getHubRemote, hubTransferTo, remotePosition, trackFromRemoteState, useHubStore } from '@/features/hub';
 
 export type { MiniTrackInfo } from '@/features/miniPlayer/utils/miniTrackInfo';
 
 export const MINI_WINDOW_LABEL = 'mini';
+
+/** Hub devices for the mini's "Play on" button (the hub connection lives in the main window). */
+export interface MiniHubInfo {
+  myId: string;
+  devices: Array<{ id: string; name: string; kind: string; active: boolean }>;
+}
 
 export interface MiniSyncPayload {
   track: MiniTrackInfo | null;
@@ -26,6 +33,8 @@ export interface MiniSyncPayload {
   crossfadeTrimSilence: boolean;
   infiniteQueueEnabled: boolean;
   isMobile: false;
+  /** Set while connected to a hub. */
+  hub: MiniHubInfo | null;
 }
 
 export type MiniControlAction =
@@ -53,19 +62,27 @@ function snapshot(): MiniSyncPayload {
     .slice(start, idx + MINI_QUEUE_HALF + 1)
     .map(r => resolveQueueTrack(r));
   miniWindowStart = start;
+  // Another device is the active player (hub): show its track and state.
+  const remote = getHubRemote();
+  const remoteTrack = remote ? trackFromRemoteState(remote.state) : null;
+  const hubState = useHubStore.getState();
+  const shownTrack = remoteTrack ?? s.currentTrack;
   return {
-    track: s.currentTrack ? toMini(s.currentTrack) : null,
+    track: shownTrack ? toMini(shownTrack) : null,
     queue: windowed.map(toMini),
     queueIndex: idx - start, // local position within the windowed slice
     queueServerId: s.queueServerId ?? null,
-    isPlaying: s.isPlaying,
-    volume: s.volume,
+    isPlaying: remote ? remote.state.playing === true : s.isPlaying,
+    volume: remote && typeof remote.state.volume === 'number' ? remote.state.volume : s.volume,
     gaplessEnabled: !!a.gaplessEnabled,
     crossfadeEnabled: !!a.crossfadeEnabled,
     crossfadeSecs: a.crossfadeSecs,
     crossfadeTrimSilence: !!a.crossfadeTrimSilence,
     infiniteQueueEnabled: !!a.infiniteQueueEnabled,
     isMobile: false,
+    hub: hubState.status === 'connected'
+      ? { myId: hubState.deviceId, devices: hubState.devices.filter(d => d.kind !== 'web') }
+      : null,
   };
 }
 
@@ -103,6 +120,7 @@ export function initMiniPlayerBridgeOnMain(): () => void {
       payload.crossfadeSecs,
       payload.crossfadeTrimSilence,
       payload.infiniteQueueEnabled,
+      (payload.hub?.devices ?? []).map(d => `${d.id}:${d.active ? 1 : 0}`).join(','),
       queueIds,
     ].join('|');
     if (key === last) return;
@@ -133,6 +151,18 @@ export function initMiniPlayerBridgeOnMain(): () => void {
       push();
     }
   });
+
+  // Hub: another device became active / its state changed / the device list changed.
+  const unsubHub = useHubStore.subscribe(() => push());
+  // While another device plays, the local audio engine is silent, so feed the mini its position.
+  const remoteProgressTimer = setInterval(() => {
+    const r = getHubRemote();
+    if (!r) return;
+    emitTo(MINI_WINDOW_LABEL, 'mini:hub-progress', {
+      current_time: remotePosition(r.state, r.stateAt),
+      duration: r.state.durationSec ?? 0,
+    }).catch(() => {});
+  }, 500);
 
   // Push an initial snapshot whenever a new mini window announces itself.
   const readyUnlisten = listen('mini:ready', () => {
@@ -242,6 +272,11 @@ export function initMiniPlayerBridgeOnMain(): () => void {
     useAuthStore.getState().setInfiniteQueueEnabled(v);
   });
 
+  // "Play on…" from the mini's device button.
+  const hubTransferUnlisten = listen<{ to: string }>('mini:hub-transfer', (e) => {
+    if (typeof e.payload?.to === 'string') hubTransferTo(e.payload.to);
+  });
+
   // Open the SongInfo modal in main for a given track id.
   const songInfoUnlisten = listen<{ id: string; serverId?: string }>('mini:song-info', (e) => {
     const id = e.payload?.id;
@@ -253,6 +288,9 @@ export function initMiniPlayerBridgeOnMain(): () => void {
   return () => {
     unsub();
     unsubAuth();
+    unsubHub();
+    clearInterval(remoteProgressTimer);
+    hubTransferUnlisten.then(fn => fn()).catch(() => {});
     readyUnlisten.then(fn => fn()).catch(() => {});
     controlUnlisten.then(fn => fn()).catch(() => {});
     jumpUnlisten.then(fn => fn()).catch(() => {});

@@ -1,3 +1,4 @@
+import { useViewTrack } from '@/features/hub';
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { usePlayerStore } from '@/features/playback/store/playerStore';
 import { useAuthStore } from '@/store/authStore';
@@ -58,7 +59,7 @@ export const FsLyricsApple = memo(function FsLyricsApple({ currentTrack }: { cur
     translations,
   });
 
-  const duration = usePlayerStore(s => s.currentTrack?.duration ?? 0);
+  const duration = useViewTrack()?.duration ?? 0;
   const seek     = usePlayerStore(s => s.seek);
 
   const linesRef    = useRef<LrcLine[]>([]);

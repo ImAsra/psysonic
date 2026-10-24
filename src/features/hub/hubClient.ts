@@ -253,9 +253,22 @@ function snapshot(): Record<string, unknown> {
 // store actions (buttons, waveform seek, media keys...) are routed to that
 // device through the hub instead of controlling the local player.
 // ---------------------------------------------------------------------------
-type Action = (...args: any[]) => unknown;
+type Action = (...args: never[]) => unknown;
+const callAction = (fn: Action, args: unknown[]) => (fn as (...a: unknown[]) => unknown)(...args);
+
+/** What the hub sends us (fields differ per message type). */
+interface HubMsg {
+  t?: string;
+  state?: HubRemoteState | null;
+  devices?: HubDevice[];
+  args?: Record<string, unknown> | null;
+  ageMs?: number;
+  fresh?: boolean;
+  [key: string]: unknown;
+}
 const ACTIONS = ['togglePlay', 'resume', 'pause', 'next', 'previous', 'seek', 'setVolume', 'playTrack',
-  'toggleShuffleMode', 'toggleRepeat', 'undoLastQueueEdit', 'redoLastQueueEdit'] as const;
+  'toggleShuffleMode', 'toggleRepeat', 'undoLastQueueEdit', 'redoLastQueueEdit',
+  'shuffleQueue', 'shuffleUpcomingQueue'] as const;
 let originals: Record<string, Action> | null = null;
 
 /** The real local player (bypasses the remote-mode routing). */
@@ -362,6 +375,9 @@ function installRemoteRouting(): () => void {
       hubCommand('seek', { positionSec: sec });
     },
     playTrack: (track: Track, queue?: Track[]) => { void remotePlayTrack(track, queue); },
+    // One-shot queue shuffles belong to whoever owns the queue: the device that is playing.
+    shuffleQueue: () => hubCommand('shuffleQueue'),
+    shuffleUpcomingQueue: () => hubCommand('shuffleUpcomingQueue'),
     undoLastQueueEdit: () => remoteQueueHistory('undo'),
     redoLastQueueEdit: () => remoteQueueHistory('redo'),
     toggleShuffleMode: () => {
@@ -387,7 +403,7 @@ function installRemoteRouting(): () => void {
   const wrapped: Record<string, Action> = {};
   for (const name of ACTIONS) {
     wrapped[name] = (...args: unknown[]) =>
-      getHubRemote() && !forceLocal ? remoteImpl[name](...args) : saved[name](...args);
+      getHubRemote() && !forceLocal ? callAction(remoteImpl[name], args) : callAction(saved[name], args);
   }
   usePlayerStore.setState(wrapped as never);
 
@@ -437,6 +453,8 @@ function applyCommand(action: string, args: Record<string, unknown> | null) {
       if (Number.isFinite(v)) p.setVolume(Math.min(1, Math.max(0, v)));
       return;
     }
+    case 'shuffleQueue': return p.shuffleQueue();
+    case 'shuffleUpcomingQueue': return p.shuffleUpcomingQueue();
     case 'shuffle': {
       if (usePlayerStore.getState().shuffleMode !== (args?.value === true)) p.toggleShuffleMode();
       return;
@@ -521,15 +539,15 @@ export function startHubClient(): () => void {
     };
 
     sock.onmessage = ev => {
-      let m: any;
-      try { m = JSON.parse(String(ev.data)); } catch { return; }
+      let m: HubMsg;
+      try { m = JSON.parse(String(ev.data)) as HubMsg; } catch { return; }
       switch (m?.t) {
         case 'welcome':
           attempt = 0;
           setRuntime({
             status: 'connected',
-            devices: m.devices as HubDevice[],
-            remoteState: m.state && m.state.from !== deviceId ? (m.state as HubRemoteState) : null,
+            devices: m.devices ?? [],
+            remoteState: m.state && m.state.from !== deviceId ? m.state : null,
             remoteStateAt: Date.now(),
           });
           sendState();
@@ -545,12 +563,12 @@ export function startHubClient(): () => void {
           }, HEARTBEAT_MS);
           break;
         case 'devices':
-          setRuntime({ devices: m.devices as HubDevice[] });
+          setRuntime({ devices: m.devices ?? [] });
           break;
         case 'state': {
-          setRuntime({ remoteState: m.state as HubRemoteState, remoteStateAt: Date.now() });
+          setRuntime({ remoteState: m.state ?? null, remoteStateAt: Date.now() });
           // Controller: keep the queue panel highlighting what the active device plays.
-          const tid = (m.state as HubRemoteState).trackId;
+          const tid = m.state?.trackId;
           if (tid && getHubRemote()) {
             const ps = usePlayerStore.getState();
             const idx = ps.queueItems.findIndex(r => r.trackId === tid);
@@ -574,7 +592,7 @@ export function startHubClient(): () => void {
           void handleYield(String(m.to), send);
           break;
         case 'takeover':
-          void handleTakeover((m.state as HubRemoteState | null) ?? null, Number(m.ageMs) || 0, m.fresh === true);
+          void handleTakeover(m.state ?? null, Number(m.ageMs) || 0, m.fresh === true);
           break;
       }
     };
