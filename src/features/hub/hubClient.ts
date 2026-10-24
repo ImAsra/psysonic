@@ -36,6 +36,7 @@ import { useHubStore } from './hubStore';
 import type { HubDevice, HubRemoteState } from './hubStore';
 import { getHubRemote, remotePosition, trackFromRemoteState } from './useHubRemote';
 import { createSettingsSync } from './hubSettingsSync';
+import { buildCoverArtUrl } from '@/lib/api/subsonicStreamUrl';
 
 /**
  * Optional realtime hub client (psysonic-hub). Does nothing unless the user
@@ -465,6 +466,28 @@ export function startHubClient(): () => void {
   hubSender = send;
   const sendState = () => send({ t: 'state', state: snapshot() });
 
+  // The playing device shares its current cover with the hub (for the web page and REST clients).
+  // The hub never talks to your music server, so the image comes from here.
+  let coverSentFor = '';
+  const toBase64 = (bytes: Uint8Array) => {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  };
+  const sendCover = async () => {
+    const track = usePlayerStore.getState().currentTrack;
+    if (!track?.coverArt || track.id === coverSentFor || getHubRemote()) return;
+    coverSentFor = track.id;
+    try {
+      const resp = await fetch(buildCoverArtUrl(track.coverArt, 400));
+      if (!resp.ok) return;
+      const blob = await resp.blob();
+      if (blob.size > 700_000 || !/^image\/(jpeg|png|webp)$/.test(blob.type)) return;
+      if (usePlayerStore.getState().currentTrack?.id !== track.id) return; // skipped meanwhile
+      send({ t: 'cover', trackId: track.id, mime: blob.type, data: toBase64(new Uint8Array(await blob.arrayBuffer())) });
+    } catch { /* no cover is fine */ }
+  };
+
   const settingsSync = createSettingsSync({
     send,
     isConnected: () => useHubStore.getState().status === 'connected' && ws?.readyState === WebSocket.OPEN,
@@ -510,6 +533,8 @@ export function startHubClient(): () => void {
             remoteStateAt: Date.now(),
           });
           sendState();
+          coverSentFor = ''; // a (re)connected hub has no cover yet
+          if (usePlayerStore.getState().isPlaying) void sendCover();
           settingsSync.onWelcome(
             (m.settings ?? {}) as Record<string, Record<string, unknown>>,
             (m.syncConfig ?? {}) as Record<string, boolean>,
@@ -601,6 +626,9 @@ export function startHubClient(): () => void {
       lastKey = key;
       if (!gaveUp) sendState();
     }
+
+    // The playing device shares its cover art with the hub.
+    if (s.isPlaying && s.currentTrack?.id && s.currentTrack.id !== coverSentFor && !gaveUp) void sendCover();
 
     // A real queue edit (not one we applied from the server): push + signal the others.
     if (s.queueItems !== prev.queueItems && s.queueItems !== lastAppliedQueue && !forceLocal) {
