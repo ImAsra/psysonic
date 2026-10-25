@@ -37,6 +37,9 @@ import type { HubDevice, HubRemoteState } from './hubStore';
 import { getHubRemote, remotePosition, trackFromRemoteState } from './useHubRemote';
 import { createSettingsSync } from './hubSettingsSync';
 import { buildCoverArtUrl } from '@/lib/api/subsonicStreamUrl';
+import { showToast } from '@/lib/dom/toast';
+import { currentServerKeys } from './hubServerKeys';
+import { deviceCompatible } from './compat';
 
 /**
  * Optional realtime hub client (psysonic-hub). Does nothing unless the user
@@ -45,7 +48,7 @@ import { buildCoverArtUrl } from '@/lib/api/subsonicStreamUrl';
  */
 
 const PROTOCOL = 1;
-const HEARTBEAT_MS = 15_000;
+const HEARTBEAT_MS = 5_000;
 const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 
 /** http(s)://host:port -> ws(s)://host:port/ws ; accepts ws(s):// as-is. */
@@ -83,20 +86,28 @@ export function hubCommand(action: string, args: Record<string, unknown> | null 
  * Subsonic server, then tell the hub we are done so it can start the target.
  */
 async function handleYield(to: string, send: (m: unknown) => void) {
+  let ok = true;
+  let reason: string | undefined;
   try {
     const p = localPlayer();
     if (p.isPlaying) p.pause(); // freezes our clock at the true pause position
     // Make the shared progress clock exact so the saved queue position is right too.
     emitMine(clockNow(), p.currentTrack?.duration ?? 0, 0);
-    await flushPlayQueuePosition();
+    if (!isPlayQueueSyncEnabled()) {
+      ok = false; reason = 'queue_sync_disabled'; // without queue sync the target cannot get our queue
+    } else if (!(await flushPlayQueuePosition())) {
+      ok = false; reason = 'queue_save_failed';
+    }
   } catch (e) {
     console.error('[psysonic-hub] yield failed', e);
+    ok = false; reason = 'queue_save_failed';
   } finally {
-    send({ t: 'yielded', to });
+    // ok:false makes the hub cancel the transfer (and tell us to carry on) instead of
+    // letting the other device load a queue that was never saved.
+    send({ t: 'yielded', to, ok, reason });
   }
 }
 
-/** We were chosen as the active player: load the queue the previous device saved, then play. */
 /** While true, player actions are never routed to the remote (we are applying things locally). */
 let forceLocal = false;
 /** While true, the remote position is not pushed into the shared progress clock. */
@@ -121,13 +132,26 @@ async function pullQueueForTakeover(serverId: string) {
   return result;
 }
 
-async function handleTakeover(hubState: HubRemoteState | null, ageMs: number, fresh: boolean) {
+async function handleTakeover(
+  hubState: HubRemoteState | null,
+  ageMs: number,
+  fresh: boolean,
+  sourceKeys: string[],
+  send: (m: unknown) => void,
+) {
+  const fail = (reason: string) => send({ t: 'takeover-failed', reason });
   const serverId = useAuthStore.getState().activeServerId;
-  if (!serverId) return;
+  if (!serverId) return fail('queue_unavailable');
+  if (!isPlayQueueSyncEnabled()) return fail('queue_sync_disabled');
+  // The hub already checked; check again here, so a handoff can never load another account's queue.
+  if (useHubStore.getState().serverCheck && sourceKeys.length) {
+    const mine = await currentServerKeys();
+    if (mine.length && !sourceKeys.some(k => mine.includes(k))) return fail('server_mismatch');
+  }
   forceLocal = true;
   try {
     const result = await pullQueueForTakeover(serverId);
-    if (result !== 'applied' && result !== 'noop') return;
+    if (result !== 'applied' && result !== 'noop') return fail('queue_unavailable');
     const player = localPlayer();
     setClock(player.currentTime, false); // position the server queue gave us
     tickGuardUntil = Date.now() + 1500;
@@ -151,10 +175,23 @@ async function handleTakeover(hubState: HubRemoteState | null, ageMs: number, fr
     localPlayer().resume();
   } catch (e) {
     console.error('[psysonic-hub] takeover failed', e);
+    fail('queue_unavailable');
   } finally {
     forceLocal = false;
   }
 }
+
+/** Tell the user why a handoff did not happen. */
+const TRANSFER_FAILED: Record<string, string> = {
+  server_mismatch: 'That device uses a different music server or account, so playback cannot move there.',
+  timeout: 'The playing device did not answer in time. The transfer was cancelled.',
+  queue_save_failed: 'The playing device could not save its queue. The transfer was cancelled.',
+  queue_sync_disabled: 'Turn on play queue sync on both devices to hand playback over.',
+  queue_unavailable: 'The other device could not load the queue.',
+  device_cannot_play: 'That device cannot play audio.',
+};
+const reportTransferFailed = (reason: string) =>
+  showToast(TRANSFER_FAILED[reason] ?? 'The transfer did not go through.', 6000, 'error');
 
 // ---------------------------------------------------------------------------
 // Local playback clock. The position we REPORT must be the true local position.
@@ -298,6 +335,11 @@ async function remotePlayTrack(track: Track, queue?: Track[]) {
   const remote = getHubRemote();
   const serverId = useAuthStore.getState().activeServerId;
   if (!remote || !serverId) return;
+  const { devices, deviceId, serverCheck } = useHubStore.getState();
+  if (!deviceCompatible(devices.find(d => d.id === deviceId), remote.device, serverCheck)) {
+    reportTransferFailed('server_mismatch');
+    return;
+  }
   forceLocal = true;
   holdProgress = true;
   try {
@@ -487,6 +529,7 @@ export function startHubClient(): () => void {
   // The playing device shares its current cover with the hub (for the web page and REST clients).
   // The hub never talks to your music server, so the image comes from here.
   let coverSentFor = '';
+  let lastServerKeys = '';
   const toBase64 = (bytes: Uint8Array) => {
     let bin = '';
     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -535,7 +578,10 @@ export function startHubClient(): () => void {
     ws = sock;
 
     sock.onopen = () => {
-      send({ t: 'hello', v: PROTOCOL, token, deviceId, name: deviceName, kind: 'desktop' });
+      void currentServerKeys().then(server => {
+        lastServerKeys = JSON.stringify(server);
+        send({ t: 'hello', v: PROTOCOL, token, deviceId, name: deviceName, kind: 'desktop', server });
+      });
     };
 
     sock.onmessage = ev => {
@@ -547,6 +593,7 @@ export function startHubClient(): () => void {
           setRuntime({
             status: 'connected',
             devices: m.devices ?? [],
+            serverCheck: m.serverCheck !== false,
             remoteState: m.state && m.state.from !== deviceId ? m.state : null,
             remoteStateAt: Date.now(),
           });
@@ -592,7 +639,16 @@ export function startHubClient(): () => void {
           void handleYield(String(m.to), send);
           break;
         case 'takeover':
-          void handleTakeover(m.state ?? null, Number(m.ageMs) || 0, m.fresh === true);
+          void handleTakeover(
+            m.state ?? null,
+            Number(m.ageMs) || 0,
+            m.fresh === true,
+            Array.isArray(m.server) ? m.server.filter((k): k is string => typeof k === 'string') : [],
+            send,
+          );
+          break;
+        case 'transfer-failed':
+          reportTransferFailed(String(m.reason));
           break;
       }
     };
@@ -626,6 +682,7 @@ export function startHubClient(): () => void {
   let lastTrackId = usePlayerStore.getState().currentTrack?.id;
   let seekTimer: ReturnType<typeof setTimeout> | undefined;
   let queueTimer: ReturnType<typeof setTimeout> | undefined;
+  let liveTimer: ReturnType<typeof setTimeout> | undefined;
   const unsubPlayer = usePlayerStore.subscribe((s, prev) => {
     // Keep our clock exact across pause/resume and track changes.
     if (s.isPlaying !== wasPlaying) {
@@ -651,6 +708,7 @@ export function startHubClient(): () => void {
     // A real queue edit (not one we applied from the server): push + signal the others.
     if (s.queueItems !== prev.queueItems && s.queueItems !== lastAppliedQueue && !forceLocal) {
       clearTimeout(queueTimer);
+    clearTimeout(liveTimer);
       queueTimer = setTimeout(() => { void pushQueueAndSignal(); }, 400);
     }
   });
@@ -658,7 +716,16 @@ export function startHubClient(): () => void {
   const unsubProgress = subscribePlaybackProgress(next => {
     if (emittingMine || getHubRemote()) return;
     if (Date.now() < tickGuardUntil && Math.abs(next.currentTime - clock.sec) > 1.5) return; // stale pre-seek tick
-    clock = { sec: next.currentTime, at: Date.now(), playing: usePlayerStore.getState().isPlaying, live: true };
+    const wasLive = clock.live;
+    const playing = usePlayerStore.getState().isPlaying;
+    clock = { sec: next.currentTime, at: Date.now(), playing, live: true };
+    // Audio really started (after a resume, seek or handoff, which can take a second or two to load).
+    // Until now other devices extrapolated from a position that was not advancing yet, so tell them the
+    // true position, otherwise their bar runs ahead and snaps back at the next heartbeat.
+    if (!wasLive && playing && !gaveUp) {
+      clearTimeout(liveTimer);
+      liveTimer = setTimeout(sendState, 60);
+    }
   });
   // Seeks announce themselves (exact target), so no guessing from position jumps.
   const unsubSeek = subscribePlaybackSeek(sec => {
@@ -666,6 +733,21 @@ export function startHubClient(): () => void {
     tickGuardUntil = Date.now() + 800;
     clearTimeout(seekTimer);
     seekTimer = setTimeout(() => { if (!gaveUp) sendState(); }, 120); // debounce drags
+  });
+
+  // The user switched music server / account while connected: tell the hub.
+  let serverTimer: ReturnType<typeof setTimeout> | undefined;
+  const unsubServer = useAuthStore.subscribe((s, prev) => {
+    if (s.activeServerId === prev.activeServerId && s.servers === prev.servers) return;
+    clearTimeout(serverTimer);
+    serverTimer = setTimeout(() => {
+      void currentServerKeys().then(server => {
+        const json = JSON.stringify(server);
+        if (json === lastServerKeys) return;
+        lastServerKeys = json;
+        send({ t: 'server', server });
+      });
+    }, 300);
   });
 
   const uninstallRouting = installRemoteRouting();
@@ -681,6 +763,8 @@ export function startHubClient(): () => void {
     unsubSeek();
     unsubProgress();
     settingsSync.dispose();
+    unsubServer();
+    clearTimeout(serverTimer);
     clearTimeout(seekTimer);
     clearTimeout(queueTimer);
     teardown();

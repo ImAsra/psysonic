@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom';
 import { emit } from '@tauri-apps/api/event';
 import { Check, Globe, Monitor, MonitorSpeaker, Smartphone } from 'lucide-react';
 import { useMiniAnchoredPopover } from '@/features/miniPlayer/hooks/useMiniAnchoredPopover';
+import { deviceCompatible } from '@/features/hub';
 import type { MiniHubInfo } from '@/features/miniPlayer/utils/miniPlayerBridge';
 
 const KIND_ICON = { desktop: Monitor, phone: Smartphone, web: Globe } as const;
@@ -16,6 +17,7 @@ export function MiniDevicePicker({ hub }: { hub: MiniHubInfo }) {
   const { open, setOpen, popStyle, btnRef, popRef } = useMiniAnchoredPopover(200, 44 + players.length * 34);
   const active = players.find(d => d.active);
   const elsewhere = !!active && active.id !== hub.myId;
+  const source = active ?? players.find(d => d.id === hub.myId);
 
   return (
     <>
@@ -37,26 +39,25 @@ export function MiniDevicePicker({ hub }: { hub: MiniHubInfo }) {
           style={popStyle}
           data-tauri-drag-region="false"
         >
-          <div style={{ fontSize: 11, opacity: 0.7 }}>Play on</div>
+          <div className="hub-device-title">Play on</div>
           {players.map(d => {
             const Icon = KIND_ICON[d.kind as keyof typeof KIND_ICON] ?? Monitor;
+            const blocked = !d.active && !deviceCompatible(source, d, hub.serverCheck);
             return (
               <button
                 key={d.id}
                 type="button"
-                className="mini-player__tool"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8, width: '100%', justifyContent: 'flex-start',
-                  padding: '6px 4px', color: d.active ? 'var(--accent)' : undefined,
-                }}
+                className={`hub-device-row${d.active ? ' hub-device-row--active' : ''}`}
                 data-tauri-drag-region="false"
+                disabled={blocked}
+                title={blocked ? 'Uses a different music server or account' : undefined}
                 onClick={() => {
                   if (!d.active) emit('mini:hub-transfer', { to: d.id }).catch(() => {});
                   setOpen(false);
                 }}
               >
                 <Icon size={14} />
-                <span style={{ flex: 1, textAlign: 'left', fontSize: 12 }}>
+                <span className="hub-device-row__name">
                   {d.name}{d.id === hub.myId ? ' (this device)' : ''}
                 </span>
                 {d.active && <Check size={12} />}

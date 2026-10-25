@@ -17,7 +17,8 @@ export const MINI_WINDOW_LABEL = 'mini';
 /** Hub devices for the mini's "Play on" button (the hub connection lives in the main window). */
 export interface MiniHubInfo {
   myId: string;
-  devices: Array<{ id: string; name: string; kind: string; active: boolean }>;
+  devices: Array<{ id: string; name: string; kind: string; active: boolean; server?: string[] }>;
+  serverCheck: boolean;
 }
 
 export interface MiniSyncPayload {
@@ -81,7 +82,7 @@ function snapshot(): MiniSyncPayload {
     infiniteQueueEnabled: !!a.infiniteQueueEnabled,
     isMobile: false,
     hub: hubState.status === 'connected'
-      ? { myId: hubState.deviceId, devices: hubState.devices.filter(d => d.kind !== 'web') }
+      ? { myId: hubState.deviceId, devices: hubState.devices.filter(d => d.kind !== 'web'), serverCheck: hubState.serverCheck }
       : null,
   };
 }

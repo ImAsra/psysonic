@@ -15,6 +15,8 @@ export interface HubDevice {
   name: string;
   kind: 'desktop' | 'phone' | 'web';
   active: boolean;
+  /** Hashes of the music server + account this device uses (see hubServerKeys.ts). */
+  server?: string[];
 }
 
 /** Playback state as reported by another device through the hub. */
@@ -68,12 +70,14 @@ interface HubStore {
   // runtime only (not persisted)
   status: HubStatus;
   devices: HubDevice[];
+  /** The hub refuses handoffs between different music servers/accounts (HUB_SERVER_CHECK). */
+  serverCheck: boolean;
   remoteState: HubRemoteState | null;
   /** Local receive time of remoteState (ms), used to extrapolate position. */
   remoteStateAt: number;
   /** remoteState as a Track; keeps its identity while the track itself is unchanged. */
   remoteTrack: Track | null;
-  setRuntime: (p: Partial<Pick<HubStore, 'status' | 'devices' | 'remoteState' | 'remoteStateAt'>>) => void;
+  setRuntime: (p: Partial<Pick<HubStore, 'status' | 'devices' | 'serverCheck' | 'remoteState' | 'remoteStateAt'>>) => void;
 }
 
 const newDeviceId = () =>
@@ -95,6 +99,7 @@ export const useHubStore = create<HubStore>()(
       setSyncPlaybackSettings: syncPlaybackSettings => set({ syncPlaybackSettings }),
       status: 'off',
       devices: [],
+      serverCheck: true,
       remoteState: null,
       remoteStateAt: 0,
       remoteTrack: null,

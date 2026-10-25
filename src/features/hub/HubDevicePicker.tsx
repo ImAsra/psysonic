@@ -3,6 +3,7 @@ import { Check, Globe, Monitor, MonitorSpeaker, Smartphone } from 'lucide-react'
 import { usePlayerBarAnchoredPopover } from '@/features/playback/hooks/usePlayerBarAnchoredPopover';
 import { useHubStore } from './hubStore';
 import { hubTransferTo } from './hubClient';
+import { deviceCompatible } from './compat';
 
 const KIND_ICON = { desktop: Monitor, phone: Smartphone, web: Globe } as const;
 
@@ -15,6 +16,7 @@ export function HubDevicePicker({ className, iconSize = 15 }: { className?: stri
   const status = useHubStore(s => s.status);
   const devices = useHubStore(s => s.devices);
   const myId = useHubStore(s => s.deviceId);
+  const serverCheck = useHubStore(s => s.serverCheck);
   const { open, setOpen, toggleOpen, popStyle, btnRef, popRef } = usePlayerBarAnchoredPopover(260);
 
   if (status !== 'connected') return null;
@@ -22,6 +24,8 @@ export function HubDevicePicker({ className, iconSize = 15 }: { className?: stri
   const players = devices.filter(d => d.kind !== 'web');
   const active = players.find(d => d.active);
   const elsewhere = !!active && active.id !== myId;
+  // The queue moves through the music server, so a device on another server/account cannot take over.
+  const source = active ?? players.find(d => d.id === myId);
 
   return (
     <>
@@ -40,24 +44,22 @@ export function HubDevicePicker({ className, iconSize = 15 }: { className?: stri
 
       {open && createPortal(
         <div ref={popRef} className="player-playback-rate-popover" style={popStyle}>
-          <div style={{ fontSize: 12, opacity: 0.7, padding: '0 4px' }}>Play on</div>
+          <div className="hub-device-title">Play on</div>
           {players.map(d => {
             const Icon = KIND_ICON[d.kind] ?? Monitor;
             const isActive = d.id === active?.id;
+            const blocked = !isActive && !deviceCompatible(source, d, serverCheck);
             return (
               <button
                 key={d.id}
                 type="button"
-                className="player-btn"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-                  justifyContent: 'flex-start', padding: '8px',
-                  color: isActive ? 'var(--accent)' : undefined,
-                }}
+                className={`hub-device-row${isActive ? ' hub-device-row--active' : ''}`}
+                disabled={blocked}
+                title={blocked ? 'Uses a different music server or account' : undefined}
                 onClick={() => { if (!isActive) hubTransferTo(d.id); setOpen(false); }}
               >
                 <Icon size={16} />
-                <span style={{ flex: 1, textAlign: 'left' }}>
+                <span className="hub-device-row__name">
                   {d.name}{d.id === myId ? ' (this device)' : ''}
                 </span>
                 {isActive && <Check size={14} />}
