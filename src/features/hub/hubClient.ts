@@ -394,6 +394,23 @@ function remoteQueueHistory(dir: 'undo' | 'redo'): boolean {
   return true; // the queue subscriber pushes it to the server and tells the other devices
 }
 
+// A slider drag fires dozens of events per second, but the hub cuts off connections that flood it.
+// Send at most one volume command per 100 ms; the last value always follows (trailing send).
+let volumeTimer: ReturnType<typeof setTimeout> | undefined;
+let volumePending: number | null = null;
+let volumeSentAt = 0;
+function sendVolumeThrottled(vol: number) {
+  volumePending = vol;
+  if (volumeTimer) return;
+  volumeTimer = setTimeout(() => {
+    volumeTimer = undefined;
+    if (volumePending === null) return;
+    hubCommand('volume', { volume: volumePending });
+    volumePending = null;
+    volumeSentAt = Date.now();
+  }, Math.max(0, 100 - (Date.now() - volumeSentAt)));
+}
+
 function installRemoteRouting(): () => void {
   const st = usePlayerStore.getState() as unknown as Record<string, Action>;
   const saved: Record<string, Action> = {};
@@ -437,8 +454,8 @@ function installRemoteRouting(): () => void {
     setVolume: (v: number) => {
       if (!Number.isFinite(v)) return;
       const vol = Math.min(1, Math.max(0, v));
-      patchRemote({ volume: vol });
-      hubCommand('volume', { volume: vol });
+      patchRemote({ volume: vol }); // the slider follows the pointer immediately
+      sendVolumeThrottled(vol);
     },
   };
 
@@ -465,6 +482,9 @@ function installRemoteRouting(): () => void {
 
   return () => {
     clearInterval(timer);
+    clearTimeout(volumeTimer);
+    volumeTimer = undefined;
+    volumePending = null;
     usePlayerStore.setState(saved as never);
     originals = null;
   };
@@ -659,7 +679,10 @@ export function startHubClient(): () => void {
       if (ev.code === 4005) { gaveUp = true; setRuntime({ status: 'unauthorized', devices: [] }); return; }
       if (ev.code === 4004) { gaveUp = true; setRuntime({ status: 'incompatible', devices: [] }); return; }
       setRuntime({ status: 'error', devices: [] });
-      const delay = BACKOFF_MS[Math.min(attempt++, BACKOFF_MS.length - 1)];
+      // 4011 = this address is locked out, 4010 = too many connections: asking again right away
+      // only gets refused again, so wait a full minute.
+      const refused = ev.code === 4011 || ev.code === 4010;
+      const delay = refused ? 60_000 : BACKOFF_MS[Math.min(attempt++, BACKOFF_MS.length - 1)];
       retryTimer = setTimeout(connect, delay);
     };
     sock.onerror = () => { /* onclose handles retry */ };
