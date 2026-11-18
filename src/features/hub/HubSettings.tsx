@@ -4,58 +4,59 @@ import { SettingsGroup } from '@/features/settings/components/SettingsGroup';
 import { SettingsToggle } from '@/features/settings/components/SettingsToggle';
 import { SettingsField } from '@/features/settings/components/SettingsSubCard';
 import { useHubStore } from './hubStore';
+import { useTranslation } from 'react-i18next';
 
 const STATUS_TEXT: Record<string, string> = {
-  off: 'Off',
-  connecting: 'Connecting…',
-  connected: 'Connected',
-  unauthorized: 'Wrong token',
-  incompatible: 'Hub/app version mismatch',
-  error: 'Unreachable, retrying…',
+  off: 'settings.hubStatusOff',
+  connecting: 'settings.hubStatusConnecting',
+  connected: 'settings.hubStatusConnected',
+  unauthorized: 'settings.hubStatusUnauthorized',
+  incompatible: 'settings.hubStatusIncompatible',
+  error: 'settings.hubStatusError',
 };
 
-// POC: plain English strings. Upstream PR will need i18n keys in every locale.
 export function HubSettings() {
-  const { enabled, url, token, deviceName, status, devices, remoteState, deviceId, syncPlaybackSettings } = useHubStore();
   const set = useHubStore.getState();
+  const { t } = useTranslation();
+  const { enabled, url, token, deviceName, status, devices, remoteState, deviceId, syncPlaybackSettings } = useHubStore();
 
   return (
-    <SettingsSubSection title="Realtime hub (optional)" icon={<Radio size={16} />}>
+    <SettingsSubSection title={t('settings.hubTitle')} icon={<Radio size={16} />}>
       <div className="settings-card">
-        <SettingsGroup title="Self-hosted hub">
-          <SettingsToggle
-            desc="Instant sync and remote control between your devices via your own psysonic-hub container. Leave off to keep the normal Subsonic queue sync."
-            ariaLabel="Enable realtime hub"
-            checked={enabled}
+       <SettingsGroup title={t('settings.hubGroup')}>
+         <SettingsToggle
+           desc={t('settings.hubDescription')}
+           ariaLabel={t('settings.hubEnable')}
+           checked={enabled}
             onChange={set.setEnabled}
-          />
+         />
           <SettingsToggle
-            desc="Keep settings identical on every connected device. Which kinds of settings are shared (playback, volume normalization, lyrics, appearance, equalizer, keybindings) is chosen on the hub's web page."
-            ariaLabel="Sync settings with the hub"
-            checked={syncPlaybackSettings}
-            onChange={set.setSyncPlaybackSettings}
+           desc={t('settings.hubSyncSettingsDescription')}
+           ariaLabel={t('settings.hubSyncSettings')}
+           checked={syncPlaybackSettings}
+           onChange={set.setSyncPlaybackSettings}
           />
-          <SettingsField label="Hub URL" desc="e.g. http://192.168.1.50:5533 or https://hub.example.com">
-            <input className="input" type="text" value={url} onChange={e => set.setUrl(e.target.value)}
-              placeholder="http://localhost:5533" autoComplete="off" spellCheck={false} />
+         <SettingsField label={t('settings.hubUrl')} desc={t('settings.hubUrlDescription')}>
+           <input className="input" type="text" value={url} onChange={e => set.setUrl(e.target.value)}
+             placeholder={t('settings.hubUrlPlaceholder')} autoComplete="off" spellCheck={false} />
           </SettingsField>
-          <SettingsField label="Hub token">
+          <SettingsField label={t('settings.hubToken')}>
             <input className="input" type="password" value={token} onChange={e => set.setToken(e.target.value)}
               autoComplete="off" />
-          </SettingsField>
-          <SettingsField label="This device's name">
-            <input className="input" type="text" value={deviceName} onChange={e => set.setDeviceName(e.target.value)}
-              autoComplete="off" />
-          </SettingsField>
-          <SettingsField label="Status" desc={STATUS_TEXT[status] ?? status}>
-            {status === 'connected' && (
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                {devices.map(d => `${d.name}${d.id === deviceId ? ' (this device)' : ''}${d.active ? ' ▶' : ''}`).join(' · ')}
-                {remoteState?.title && (
-                  <div>Remote: {remoteState.playing ? '▶' : '⏸'} {remoteState.artist} – {remoteState.title}</div>
+         </SettingsField>
+         <SettingsField label={t('settings.hubDeviceName')}>
+           <input className="input" type="text" value={deviceName} onChange={e => set.setDeviceName(e.target.value)}
+             autoComplete="off" />
+         </SettingsField>
+         <SettingsField label={t('settings.hubStatus')} desc={t(STATUS_TEXT[status] ?? status)}>
+           {status === 'connected' && (
+             <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+               {devices.map(d => `${d.name}${d.id === deviceId ? ` (${t('settings.hubThisDevice')})` : ''}${d.active ? ' ▶' : ''}`).join(' · ')}
+               {remoteState?.title && (
+                 <div>{t('settings.hubRemote')}: {remoteState.playing ? '▶' : '⏸'} {remoteState.artist} – {remoteState.title}</div>
                 )}
-              </div>
-            )}
+             </div>
+           )}
           </SettingsField>
         </SettingsGroup>
       </div>
