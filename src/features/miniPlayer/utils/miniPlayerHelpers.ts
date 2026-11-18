@@ -66,13 +66,14 @@ export function initialSnapshot(): MiniSyncPayload {
       crossfadeTrimSilence: false,
       infiniteQueueEnabled: false,
       isMobile: false,
+      hub: null,
     };
   } catch {
     return {
       track: null, queue: [], queueIndex: 0, queueServerId: null, isPlaying: false,
       volume: 1, gaplessEnabled: false, crossfadeEnabled: false,
       crossfadeSecs: 3, crossfadeTrimSilence: false,
-      infiniteQueueEnabled: false, isMobile: false,
+      infiniteQueueEnabled: false, isMobile: false, hub: null,
     };
   }
 }

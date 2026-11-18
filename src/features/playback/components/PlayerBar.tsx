@@ -34,6 +34,7 @@ import { PlayerOverflowMenu } from '@/features/playback/components/playerBar/Pla
 import { ScrobbleActionButton } from '@/features/playback/components/playerBar/ScrobbleStatus';
 import { useFloatingPlayerBar } from '@/features/playback/hooks/useFloatingPlayerBar';
 import { useUtilityOverflowMenu } from '@/features/playback/hooks/useUtilityOverflowMenu';
+import { HubDevicePicker, useHubRemote } from '@/features/hub';
 import {
   usePlayerBarLayoutStore,
   type PlayerBarLayoutItemId,
@@ -55,9 +56,9 @@ export default function PlayerBar() {
   const premuteVolumeRef = useRef(1);
   // currentTime is intentionally excluded — PlaybackTime handles it via direct DOM update.
   const {
-    currentTrack, currentRadio, isPlaying, volume,
+    currentTrack: localTrack, currentRadio, isPlaying: localPlaying, volume: localVolume,
     togglePlay, next, previous, setVolume,
-    stop, toggleRepeat, repeatMode, toggleShuffleMode, shuffleMode, toggleFullscreen,
+    stop, toggleRepeat, repeatMode: localRepeat, toggleShuffleMode, shuffleMode: localShuffle, toggleFullscreen,
     networkLoved, toggleNetworkLove,
     starredOverrides,
     userRatingOverrides,
@@ -85,11 +86,18 @@ export default function PlayerBar() {
     userRatingOverrides: s.userRatingOverrides,
     openContextMenu: s.openContextMenu,
   })));
+
+  // Another device is the active player (hub): show its track/state in this same bar.
+  const hubRemote = useHubRemote();
+  const currentTrack = hubRemote?.track ?? localTrack;
+  const isPlaying = hubRemote ? hubRemote.state.playing === true : localPlaying;
+  const volume = hubRemote && typeof hubRemote.state.volume === 'number' ? hubRemote.state.volume : localVolume;
+  const repeatMode = hubRemote?.state.repeat ?? localRepeat;
+  const shuffleMode = hubRemote?.state.shuffle ?? localShuffle;
   const enrichmentPrimaryId = useAuthStore(s => s.enrichmentPrimaryId);
   const floatingPlayerBar = useThemeStore(s => s.floatingPlayerBar);
   const playerBarRef = useRef<HTMLElement>(null);
   const perfFlags = usePerfProbeFlags();
-
   const floatingStyle = useFloatingPlayerBar(playerBarRef, floatingPlayerBar);
 
   const {
@@ -287,7 +295,7 @@ export default function PlayerBar() {
             t={t}
             className="player-btn player-btn-sm player-scrobble-btn"
           />
-
+          <HubDevicePicker />
           {isLayoutVisible('playbackRate') && (
             <PlayerPlaybackRate t={t} />
           )}

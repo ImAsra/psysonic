@@ -62,6 +62,7 @@ import { AppShellQueueResizerSeam } from '@/app/AppShellQueueResizerSeam';
 import { IS_LINUX, IS_MACOS, IS_WINDOWS } from '@/lib/util/platform';
 import { useConnectionStatus } from '@/lib/hooks/useConnectionStatus';
 import { useIdlePlayQueuePull } from '@/app/hooks/useIdlePlayQueuePull';
+import { useHubConnection } from '@/features/hub';
 import { useShareBootstrap } from '@/features/share';
 import { DiscordBanner, useAccumulatedUsage } from '@/features/discordBanner';
 import { PrivateModeToggle } from '@/features/privateMode/ui';
@@ -116,6 +117,7 @@ export function AppShell() {
   const isPlaying = usePlayerStore(s => s.isPlaying);
   const { status: connStatus, isRetrying: connRetrying, retry: connRetry, isLan, serverName } = useConnectionStatus();
   useIdlePlayQueuePull(connStatus);
+  useHubConnection();
   const navigate = useNavigate();
   const location = useLocation();
   const prevPathnameRef = useRef(location.pathname);

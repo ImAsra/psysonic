@@ -1,3 +1,4 @@
+import { HubDevicePicker, useViewTrack, useViewPlaying, useViewRepeat } from '@/features/hub';
 import React, { memo, useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -53,9 +54,9 @@ export default function FullscreenPlayerPrism({ onClose }: { onClose: () => void
   const { t } = useTranslation();
   const navigatePlaybackLibrary = usePlaybackLibraryNavigate();
 
-  const currentTrack = usePlayerStore(s => s.currentTrack);
-  const isPlaying    = usePlayerStore(s => s.isPlaying);
-  const repeatMode   = usePlayerStore(s => s.repeatMode);
+  const currentTrack = useViewTrack();
+  const isPlaying    = useViewPlaying();
+  const repeatMode   = useViewRepeat();
   const togglePlay   = usePlayerStore(s => s.togglePlay);
   const next         = usePlayerStore(s => s.next);
   const previous     = usePlayerStore(s => s.previous);
@@ -125,6 +126,7 @@ export default function FullscreenPlayerPrism({ onClose }: { onClose: () => void
           >
             {repeatIcon}
           </button>
+          <HubDevicePicker className="fsp2-btn" iconSize={18} />
           <FsTimeReadout duration={duration} remaining className="fsp2-time" />
         </div>
 

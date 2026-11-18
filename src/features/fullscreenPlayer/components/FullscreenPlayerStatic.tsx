@@ -1,3 +1,4 @@
+import { HubDevicePicker, useViewTrack, useViewRepeat } from '@/features/hub';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   SkipBack, SkipForward, Square, Repeat, Repeat1, Heart,
@@ -65,8 +66,8 @@ export default function FullscreenPlayerStatic({ onClose }: Props) {
   const { t } = useTranslation();
   const showStarRatings = useShowStarRatings();
   const navigatePlaybackLibrary = usePlaybackLibraryNavigate();
-  const currentTrack = usePlayerStore(s => s.currentTrack);
-  const repeatMode = usePlayerStore(s => s.repeatMode);
+  const currentTrack = useViewTrack();
+  const repeatMode = useViewRepeat();
   const next = usePlayerStore(s => s.next);
   const previous = usePlayerStore(s => s.previous);
   const stop = usePlayerStore(s => s.stop);
@@ -340,6 +341,7 @@ export default function FullscreenPlayerStatic({ onClose }: Props) {
             <button className="fsp-btn fsp-btn-sm" onClick={shuffleUpcomingQueue} aria-label={t('player.shuffle')} data-tooltip={t('player.shuffle')}>
               <Shuffle size={20} />
             </button>
+            <HubDevicePicker className="fsp-btn fsp-btn-sm" iconSize={20} />
           </div>
         </div>
 
