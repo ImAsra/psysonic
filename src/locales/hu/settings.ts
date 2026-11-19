@@ -933,4 +933,5 @@ export const settings = {
   hubStatusError: 'Nem érhető el, újrapróbálkozás…',
   hubThisDevice: 'ez az eszköz',
   hubRemote: 'Távoli',
+  hubInsecureWarning: 'Ez a kapcsolat nincs titkosítva. Csak megbízható helyi hálózaton használja. Interneten keresztüli kapcsolathoz használjon HTTPS/WSS-t.',
 };

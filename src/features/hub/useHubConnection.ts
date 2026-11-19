@@ -1,7 +1,37 @@
 import { useEffect } from 'react';
-import { startHubClient } from './hubClient';
+import { startHubClient, toHubWsUrl } from './hubClient';
+import { useHubStore } from './hubStore';
 
-/** Mount once (AppShell). No-op until the user enables the hub in Settings. */
+/** Mount once (AppShell). Start the hub client only when it is configured and enabled. */
 export function useHubConnection() {
-  useEffect(() => startHubClient(), []);
+  useEffect(() => {
+    let stopClient: (() => void) | null = null;
+
+    const syncConnection = () => {
+      const { enabled, url, token } = useHubStore.getState();
+      const shouldRun = enabled && !!token.trim() && !!toHubWsUrl(url);
+
+      if (shouldRun && !stopClient) {
+        stopClient = startHubClient();
+      } else if (!shouldRun && stopClient) {
+        stopClient();
+        stopClient = null;
+        useHubStore.getState().setRuntime({
+          status: 'off',
+          devices: [],
+          remoteState: null,
+        });
+      }
+    };
+
+    syncConnection();
+
+    const unsubscribe = useHubStore.subscribe(syncConnection);
+
+    return () => {
+      unsubscribe();
+      stopClient?.();
+      stopClient = null;
+    };
+  }, []);
 }

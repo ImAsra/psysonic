@@ -927,4 +927,5 @@ export const settings = {
   hubStatusError: '接続できません。再試行しています…',
   hubThisDevice: 'このデバイス',
   hubRemote: 'リモート',
+  hubInsecureWarning: 'この接続は暗号化されていません。信頼できるローカルネットワークでのみ使用してください。インターネット経由で接続する場合はHTTPS/WSSを使用してください。',
 };

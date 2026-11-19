@@ -933,4 +933,5 @@ export const settings = {
   hubStatusError: 'No disponible, reintentando…',
   hubThisDevice: 'este dispositivo',
   hubRemote: 'Remoto',
+  hubInsecureWarning: 'Esta conexión no está cifrada. Úsela solo en una red local de confianza. Utilice HTTPS/WSS para conectarse a través de Internet.',
 };

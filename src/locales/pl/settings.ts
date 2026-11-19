@@ -933,4 +933,5 @@ export const settings = {
   hubStatusError: 'Niedostępny, ponawianie próby…',
   hubThisDevice: 'to urządzenie',
   hubRemote: 'Zdalne',
+  hubInsecureWarning: 'To połączenie nie jest szyfrowane. Używaj go tylko w zaufanej sieci lokalnej. Do połączeń przez internet używaj HTTPS/WSS.',
 };

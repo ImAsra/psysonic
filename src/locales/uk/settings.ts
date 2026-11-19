@@ -936,6 +936,7 @@ export const settings = {
   hubStatusError: 'Недоступний, повторна спроба…',
   hubThisDevice: 'цей пристрій',
   hubRemote: 'Віддалено',
+  hubInsecureWarning: "Це з'єднання не зашифроване. Використовуйте його лише в надійній локальній мережі. Для підключення через інтернет використовуйте HTTPS/WSS.",
   hubPlayOnDevice: '在设备上播放',
   hubPlayOn: '播放到',
   hubPlayingOn: '正在 {{name}} 上播放',

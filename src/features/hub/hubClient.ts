@@ -778,7 +778,6 @@ const syncRemoteRouting = () => {
     // A real queue edit (not one we applied from the server): push + signal the others.
     if (s.queueItems !== prev.queueItems && s.queueItems !== lastAppliedQueue && !forceLocal) {
       clearTimeout(queueTimer);
-    clearTimeout(liveTimer);
       queueTimer = setTimeout(() => { void pushQueueAndSignal(); }, 400);
     }
   });
@@ -838,6 +837,7 @@ const syncRemoteRouting = () => {
     clearTimeout(serverTimer);
     clearTimeout(seekTimer);
     clearTimeout(queueTimer);
+    clearTimeout(liveTimer);
     clearTimeout(settingsConnectTimer);
     teardown();
   };

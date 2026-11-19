@@ -933,4 +933,5 @@ export const settings = {
   hubStatusError: 'Unreachable, retrying…',
   hubThisDevice: 'this device',
   hubRemote: 'Remote',
+  hubInsecureWarning: 'This connection is unencrypted. Only use it on a trusted local network. Use HTTPS/WSS when connecting over the internet.',
 };

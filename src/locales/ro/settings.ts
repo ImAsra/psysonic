@@ -933,4 +933,5 @@ export const settings = {
   hubStatusError: 'Indisponibil, se reîncearcă…',
   hubThisDevice: 'acest dispozitiv',
   hubRemote: 'La distanță',
+  hubInsecureWarning: 'Această conexiune nu este criptată. Folosiți-o doar într-o rețea locală de încredere. Utilizați HTTPS/WSS pentru conexiunile prin internet.',
 };

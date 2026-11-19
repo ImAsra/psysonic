@@ -936,4 +936,5 @@ export const settings = {
   hubStatusError: 'Utilgjengelig, prøver igjen…',
   hubThisDevice: 'denne enheten',
   hubRemote: 'Ekstern',
+  hubInsecureWarning: 'Denne tilkoblingen er ukryptert. Bruk den bare på et pålitelig lokalt nettverk. Bruk HTTPS/WSS når du kobler til via internett.',
 };

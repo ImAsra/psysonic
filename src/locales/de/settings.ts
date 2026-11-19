@@ -933,4 +933,5 @@ export const settings = {
   hubStatusError: 'Nicht erreichbar, erneuter Versuch…',
   hubThisDevice: 'dieses Gerät',
   hubRemote: 'Entfernt',
+  hubInsecureWarning: 'Diese Verbindung ist unverschlüsselt. Verwenden Sie sie nur in einem vertrauenswürdigen lokalen Netzwerk. Nutzen Sie HTTPS/WSS für Verbindungen über das Internet.',
 };

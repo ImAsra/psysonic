@@ -933,4 +933,5 @@ export const settings = {
   hubStatusError: 'Niet bereikbaar, opnieuw proberen…',
   hubThisDevice: 'dit apparaat',
   hubRemote: 'Op afstand',
+  hubInsecureWarning: 'Deze verbinding is niet versleuteld. Gebruik deze alleen op een vertrouwd lokaal netwerk. Gebruik HTTPS/WSS wanneer je verbinding maakt via het internet.',
 };

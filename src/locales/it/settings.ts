@@ -935,4 +935,5 @@ export const settings = {
   hubStatusError: 'Non raggiungibile, nuovo tentativo…',
   hubThisDevice: 'questo dispositivo',
   hubRemote: 'Remoto',
+  hubInsecureWarning: 'Questa connessione non è crittografata. Usala solo su una rete locale affidabile. Usa HTTPS/WSS per le connessioni tramite Internet.',
 };

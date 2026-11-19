@@ -932,4 +932,5 @@ export const settings = {
   hubStatusError: '无法访问，正在重试…',
   hubThisDevice: '此设备',
   hubRemote: '远程',
+  hubInsecureWarning: '此连接未加密。请仅在可信的本地网络中使用。通过互联网连接时，请使用 HTTPS/WSS。',
 };
