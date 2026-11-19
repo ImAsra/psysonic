@@ -63,6 +63,24 @@ describe('useHubConnection', () => {
     expect(startHubClient).not.toHaveBeenCalled();
   });
 
+  it('does not recursively start when startup synchronously updates runtime state', () => {
+    vi.mocked(startHubClient).mockImplementation(() => {
+      useHubStore.getState().setRuntime({ status: 'connecting' });
+      return stopClient;
+    });
+
+    useHubStore.setState({
+      enabled: true,
+      url: 'http://localhost:5599',
+      token: 'test-token',
+    });
+
+    renderHook(() => useHubConnection());
+
+    expect(startHubClient).toHaveBeenCalledTimes(1);
+    expect(useHubStore.getState().status).toBe('connecting');
+  });
+
   it('stops the client and resets runtime state when disabled', () => {
     useHubStore.setState({
       enabled: true,

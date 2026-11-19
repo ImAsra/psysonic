@@ -6,13 +6,19 @@ import { useHubStore } from './hubStore';
 export function useHubConnection() {
   useEffect(() => {
     let stopClient: (() => void) | null = null;
+    let startingClient = false;
 
     const syncConnection = () => {
       const { enabled, url, token } = useHubStore.getState();
       const shouldRun = enabled && !!token.trim() && !!toHubWsUrl(url);
 
-      if (shouldRun && !stopClient) {
-        stopClient = startHubClient();
+      if (shouldRun && !stopClient && !startingClient) {
+        startingClient = true;
+        try {
+          stopClient = startHubClient();
+        } finally {
+          startingClient = false;
+        }
       } else if (!shouldRun && stopClient) {
         stopClient();
         stopClient = null;
