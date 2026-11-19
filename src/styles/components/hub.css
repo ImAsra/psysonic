@@ -1,12 +1,31 @@
 /* Psysonic Hub: "Play on" device picker rows (player bar, fullscreen player, mini player).
    Deliberately NOT built on .player-btn / .mini-player__tool: themes restyle those buttons
    (gradients, glossy pills, sizes) and a list row has to stay a plain row in every theme. */
+
+/* Player-bar popover container only. Fullscreen/mini player bring their own wrapper. */
+.hub-device-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+}
+
 .hub-device-title {
-  padding: 0 4px;
+  padding: 4px 8px 6px;
   font-size: 11px;
-  letter-spacing: 0.04em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
+}
+
+.hub-device-popover .hub-device-title {
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
 }
 
 .hub-device-row {
@@ -14,14 +33,15 @@
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  padding: 7px 8px;
+  padding: 9px 10px;
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: 13px;
   line-height: 1.25;
   cursor: pointer;
+  transition: background 120ms ease;
 }
 
 .hub-device-row:hover,
@@ -37,6 +57,12 @@
 .hub-device-row--active {
   color: var(--accent);
   font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.hub-device-row--active:hover,
+.hub-device-row--active:focus-visible {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .hub-device-row svg {
