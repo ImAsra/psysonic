@@ -40,6 +40,8 @@ import { buildCoverArtUrl } from '@/lib/api/subsonicStreamUrl';
 import { showToast } from '@/lib/dom/toast';
 import { currentServerKeys } from './hubServerKeys';
 import { deviceCompatible } from './compat';
+import { hubQueueWindow, resolveQueuePlayIndex } from './hubQueue';
+import { hubArtwork, hubBrowse, hubPlayableTracks, type HubBrowseRequest } from './hubLibrary';
 
 /**
  * Optional realtime hub client (psysonic-hub). Does nothing unless the user
@@ -496,9 +498,34 @@ function installRemoteRouting(): () => void {
   };
 }
 
+/** A remote picked a position in this device's queue (ignored when the queue changed meanwhile). */
+function playQueueIndex(args: Record<string, unknown> | null) {
+  const p = localPlayer();
+  const tracks = getQueueTracksView(usePlayerStore.getState().queueItems);
+  const index = resolveQueuePlayIndex(tracks, args?.index, args?.trackId);
+  if (index >= 0) p.playTrack(tracks[index], undefined, undefined, undefined, index);
+}
+
+/** A remote picked an album, playlist or song from the library: play it, play it next, or add it. */
+async function playLibraryItem(args: Record<string, unknown> | null) {
+  try {
+    const tracks = await hubPlayableTracks(args?.kind, args?.id);
+    if (!tracks.length) return;
+    const p = localPlayer();
+    if (args?.mode === 'next') return p.playNext(tracks);
+    if (args?.mode === 'add') return p.enqueue(tracks);
+    const start = typeof args?.index === 'number' && args.index >= 0 && args.index < tracks.length ? args.index : 0;
+    p.playTrack(tracks[start], tracks, true, undefined, start);
+  } catch (e) {
+    console.error('[psysonic-hub] could not play library item', e);
+  }
+}
+
 function applyCommand(action: string, args: Record<string, unknown> | null) {
   const p = localPlayer();
   switch (action) {
+    case 'playIndex': return playQueueIndex(args);
+    case 'playItem': return void playLibraryItem(args);
     case 'play': return p.resume();
     case 'pause': return p.pause();
     case 'toggle': return p.togglePlay();
@@ -567,6 +594,24 @@ const syncRemoteRouting = () => {
   };
   hubSender = send;
   const sendState = () => send({ t: 'state', state: snapshot() });
+  // Remotes show the queue of the playing device. A controller's local queue is only a mirror, so it stays quiet.
+  const sendQueue = () => {
+    if (getHubRemote()) return;
+    const p = usePlayerStore.getState();
+    send({ t: 'queue', queue: hubQueueWindow(getQueueTracksView(p.queueItems), p.queueIndex) });
+  };
+  const answerBrowse = async (rid: unknown, req: unknown) => {
+    try {
+      send({ t: 'browse-result', rid, result: await hubBrowse(req as HubBrowseRequest) });
+    } catch (e) {
+      console.error('[psysonic-hub] browse failed', e);
+      send({ t: 'browse-result', rid, error: 'lookup_failed' });
+    }
+  };
+  const answerArt = async (rid: unknown, coverArt: unknown, size: unknown) => {
+    const art = typeof coverArt === 'string' ? await hubArtwork(coverArt, Number(size) || 160) : null;
+    send({ t: 'art', rid, ...(art ?? {}) });
+  };
 
   // The playing device shares its current cover with the hub (for the web page and REST clients).
   // The hub never talks to your music server, so the image comes from here.
@@ -645,6 +690,7 @@ const syncRemoteRouting = () => {
             remoteStateAt: Date.now(),
           });
           sendState();
+          sendQueue();
           coverSentFor = ''; // a (re)connected hub has no cover yet
           if (usePlayerStore.getState().isPlaying) void sendCover();
           settingsSync.onWelcome(
@@ -696,6 +742,12 @@ const syncRemoteRouting = () => {
           break;
         case 'transfer-failed':
           reportTransferFailed(String(m.reason));
+          break;
+        case 'browse':
+          void answerBrowse(m.rid, m.req);
+          break;
+        case 'art-request':
+          void answerArt(m.rid, m.coverArt, m.size);
           break;
       }
     };
@@ -752,6 +804,7 @@ const syncRemoteRouting = () => {
   let lastTrackId = usePlayerStore.getState().currentTrack?.id;
   let seekTimer: ReturnType<typeof setTimeout> | undefined;
   let queueTimer: ReturnType<typeof setTimeout> | undefined;
+  let queueWindowTimer: ReturnType<typeof setTimeout> | undefined;
   let liveTimer: ReturnType<typeof setTimeout> | undefined;
   const unsubPlayer = usePlayerStore.subscribe((s, prev) => {
     // Keep our clock exact across pause/resume and track changes.
@@ -774,6 +827,12 @@ const syncRemoteRouting = () => {
 
     // The playing device shares its cover art with the hub.
     if (s.isPlaying && s.currentTrack?.id && s.currentTrack.id !== coverSentFor && !gaveUp) void sendCover();
+
+    // Remotes see the queue window; a new current track moves it too.
+    if ((s.queueItems !== prev.queueItems || s.queueIndex !== prev.queueIndex) && !gaveUp) {
+      clearTimeout(queueWindowTimer);
+      queueWindowTimer = setTimeout(sendQueue, 300);
+    }
 
     // A real queue edit (not one we applied from the server): push + signal the others.
     if (s.queueItems !== prev.queueItems && s.queueItems !== lastAppliedQueue && !forceLocal) {
@@ -837,6 +896,7 @@ const syncRemoteRouting = () => {
     clearTimeout(serverTimer);
     clearTimeout(seekTimer);
     clearTimeout(queueTimer);
+    clearTimeout(queueWindowTimer);
     clearTimeout(liveTimer);
     clearTimeout(settingsConnectTimer);
     teardown();
