@@ -692,28 +692,139 @@ span.settings-server-use-active-slot {
   transition: opacity 150ms ease;
 }
 
-.hub-settings-status-details {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  font-size: 12px;
-  color: var(--text-muted);
+.hub-settings-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
 }
 
-.hub-settings-device-list {
+.hub-settings-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.hub-settings-status--connected {
+  color: var(--positive);
+  background: color-mix(in srgb, var(--positive) 14%, transparent);
+}
+
+.hub-settings-status--connected .hub-settings-status-dot {
+  background: var(--positive);
+}
+
+.hub-settings-status--connecting .hub-settings-status-dot {
+  background: var(--warning);
+}
+
+.hub-settings-status--unauthorized,
+.hub-settings-status--incompatible,
+.hub-settings-status--error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.hub-settings-status--unauthorized .hub-settings-status-dot,
+.hub-settings-status--incompatible .hub-settings-status-dot,
+.hub-settings-status--error .hub-settings-status-dot {
+  background: var(--danger);
+}
+
+.hub-settings-token {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.hub-settings-token .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.hub-settings-test {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.hub-settings-test .spinner {
+  width: 16px;
+  height: 16px;
+}
+
+.hub-settings-test-result {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.hub-settings-test-result.is-ok {
+  color: var(--positive);
+}
+
+.hub-settings-test-result.is-error {
+  color: var(--danger);
+}
+
+.hub-settings-devices {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-2);
 }
 
 .hub-settings-device {
-  padding: 3px 8px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: var(--bg-card);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.hub-settings-device.is-active {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border-subtle));
+}
+
+.hub-settings-device-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hub-settings-chip {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.hub-settings-chip.is-playing {
+  color: var(--text-on-accent);
+  background: var(--accent);
 }
 
 .hub-settings-remote-track {
+  font-size: 12px;
   color: var(--text-secondary);
   min-width: 0;
   overflow: hidden;
