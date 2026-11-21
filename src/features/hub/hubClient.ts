@@ -806,6 +806,11 @@ const syncRemoteRouting = () => {
   let queueTimer: ReturnType<typeof setTimeout> | undefined;
   let queueWindowTimer: ReturnType<typeof setTimeout> | undefined;
   let liveTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleQueue = () => {
+    if (gaveUp) return;
+    clearTimeout(queueWindowTimer);
+    queueWindowTimer = setTimeout(sendQueue, 300);
+  };
   const unsubPlayer = usePlayerStore.subscribe((s, prev) => {
     // Keep our clock exact across pause/resume and track changes.
     if (s.isPlaying !== wasPlaying) {
@@ -828,10 +833,10 @@ const syncRemoteRouting = () => {
     // The playing device shares its cover art with the hub.
     if (s.isPlaying && s.currentTrack?.id && s.currentTrack.id !== coverSentFor && !gaveUp) void sendCover();
 
-    // Remotes see the queue window; a new current track moves it too.
-    if ((s.queueItems !== prev.queueItems || s.queueIndex !== prev.queueIndex) && !gaveUp) {
-      clearTimeout(queueWindowTimer);
-      queueWindowTimer = setTimeout(sendQueue, 300);
+    // Remotes see the queue window; a new current track moves it too. Starting to play counts as
+    // well: a device that was idle may never have sent its queue, and it is the one remotes show now.
+    if (s.queueItems !== prev.queueItems || s.queueIndex !== prev.queueIndex || (s.isPlaying && !prev.isPlaying)) {
+      scheduleQueue();
     }
 
     // A real queue edit (not one we applied from the server): push + signal the others.
@@ -861,6 +866,15 @@ const syncRemoteRouting = () => {
     tickGuardUntil = Date.now() + 800;
     clearTimeout(seekTimer);
     seekTimer = setTimeout(() => { if (!gaveUp) sendState(); }, 120); // debounce drags
+  });
+
+  // While another device played, this one stayed quiet about its queue (it only mirrored). Once it is
+  // no longer mirroring (it took over, or the other device stopped), its own queue is the real one again.
+  let wasMirroring = !!getHubRemote();
+  const unsubRemote = useHubStore.subscribe(() => {
+    const mirroring = !!getHubRemote();
+    if (wasMirroring && !mirroring) scheduleQueue();
+    wasMirroring = mirroring;
   });
 
   // The user switched music server / account while connected: tell the hub.
@@ -893,6 +907,7 @@ const syncRemoteRouting = () => {
     unsubProgress();
     settingsSync.dispose();
     unsubServer();
+    unsubRemote();
     clearTimeout(serverTimer);
     clearTimeout(seekTimer);
     clearTimeout(queueTimer);
