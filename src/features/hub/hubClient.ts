@@ -26,6 +26,7 @@ import {
   queueUndoSnapshotFromState,
 } from '@/features/playback/store/queueUndo';
 import { getQueueTracksView } from '@/features/playback/store/queueTrackView';
+import { subscribeQueueResolver } from '@/features/playback/store/queueTrackResolver';
 import type { Track } from '@/lib/media/trackTypes';
 import {
   emitPlaybackProgress,
@@ -507,9 +508,15 @@ function playQueueIndex(args: Record<string, unknown> | null) {
 }
 
 /** A remote picked an album, playlist or song from the library: play it, play it next, or add it. */
+/** Bumped by every "play this" (replace) request: a lookup that finishes after a newer one is dropped. */
+let playItemGeneration = 0;
+
 async function playLibraryItem(args: Record<string, unknown> | null) {
+  const replaces = args?.mode !== 'next' && args?.mode !== 'add';
+  const generation = replaces ? ++playItemGeneration : playItemGeneration;
   try {
     const tracks = await hubPlayableTracks(args?.kind, args?.id);
+    if (replaces && generation !== playItemGeneration) return; // a newer "play this" came in meanwhile
     if (!tracks.length) return;
     const p = localPlayer();
     if (args?.mode === 'next') return p.playNext(tracks);
@@ -595,10 +602,16 @@ const syncRemoteRouting = () => {
   hubSender = send;
   const sendState = () => send({ t: 'state', state: snapshot() });
   // Remotes show the queue of the playing device. A controller's local queue is only a mirror, so it stays quiet.
+  // The last window sent, so a track resolving outside it (or the same data again) sends nothing.
+  let lastQueueJson = '';
   const sendQueue = () => {
     if (getHubRemote()) return;
     const p = usePlayerStore.getState();
-    send({ t: 'queue', queue: hubQueueWindow(getQueueTracksView(p.queueItems), p.queueIndex) });
+    const queue = hubQueueWindow(getQueueTracksView(p.queueItems), p.queueIndex);
+    const json = JSON.stringify(queue);
+    if (json === lastQueueJson) return;
+    lastQueueJson = json;
+    send({ t: 'queue', queue });
   };
   const answerBrowse = async (rid: unknown, req: unknown) => {
     try {
@@ -690,8 +703,9 @@ const syncRemoteRouting = () => {
             remoteStateAt: Date.now(),
           });
           sendState();
+          lastQueueJson = ''; // a (re)connected hub has no queue yet
           sendQueue();
-          coverSentFor = ''; // a (re)connected hub has no cover yet
+          coverSentFor = ''; // nor a cover
           if (usePlayerStore.getState().isPlaying) void sendCover();
           settingsSync.onWelcome(
             (m.settings ?? {}) as Record<string, Record<string, unknown>>,
@@ -870,6 +884,9 @@ const syncRemoteRouting = () => {
 
   // While another device played, this one stayed quiet about its queue (it only mirrored). Once it is
   // no longer mirroring (it took over, or the other device stopped), its own queue is the real one again.
+  // A restored queue starts with placeholders for tracks not looked up yet; resend once they resolve.
+  const unsubResolver = subscribeQueueResolver(scheduleQueue);
+
   let wasMirroring = !!getHubRemote();
   const unsubRemote = useHubStore.subscribe(() => {
     const mirroring = !!getHubRemote();
@@ -908,6 +925,7 @@ const syncRemoteRouting = () => {
     settingsSync.dispose();
     unsubServer();
     unsubRemote();
+    unsubResolver();
     clearTimeout(serverTimer);
     clearTimeout(seekTimer);
     clearTimeout(queueTimer);

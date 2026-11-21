@@ -5,6 +5,7 @@ import { search } from '@/lib/api/subsonicSearch';
 import { buildCoverArtUrl } from '@/lib/api/subsonicStreamUrl';
 import type { SubsonicAlbum, SubsonicArtist, SubsonicPlaylist, SubsonicSong } from '@/lib/api/subsonicTypes';
 import { songToTrack } from '@/lib/media/songToTrack';
+import { activeServerProfileId } from '@/lib/media/trackServerScope';
 import type { Track } from '@/lib/media/trackTypes';
 
 // Library browsing for hub remotes. A remote (the hub web page) has no music-server access of its
@@ -103,11 +104,14 @@ export async function hubBrowse(req: HubBrowseRequest): Promise<HubBrowseResult>
 /** The tracks a remote's "play this album / playlist / song" refers to. */
 export async function hubPlayableTracks(kind: unknown, id: unknown): Promise<Track[]> {
   if (typeof id !== 'string' || !id) return [];
-  if (kind === 'album') return (await getAlbum(id)).songs.map(songToTrack);
-  if (kind === 'playlist') return (await getPlaylist(id)).songs.map(songToTrack);
+  // The server the lookup goes to: tracks keep it even if the user switches servers meanwhile.
+  const serverId = activeServerProfileId();
+  const toTrack = (song: SubsonicSong): Track => songToTrack({ ...song, serverId: song.serverId ?? serverId });
+  if (kind === 'album') return (await getAlbum(id)).songs.map(toTrack);
+  if (kind === 'playlist') return (await getPlaylist(id)).songs.map(toTrack);
   if (kind === 'song') {
     const song = await getSong(id);
-    return song ? [songToTrack(song)] : [];
+    return song ? [toTrack(song)] : [];
   }
   return [];
 }
