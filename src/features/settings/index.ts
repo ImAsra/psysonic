@@ -14,3 +14,6 @@
 export { default as SettingsSubSection } from './components/SettingsSubSection';
 export { PlaybackRateControls } from './components/audio/PlaybackRateBlock';
 export { CustomHttpHeadersEditor } from './components/CustomHttpHeadersEditor';
+export { SettingsGroup } from './components/SettingsGroup';
+export { SettingsToggle } from './components/SettingsToggle';
+export { SettingsField, SettingsSubCard } from './components/SettingsSubCard';

@@ -1,7 +1,4 @@
-import SettingsSubSection from '@/features/settings/components/SettingsSubSection';
-import { SettingsGroup } from '@/features/settings/components/SettingsGroup';
-import { SettingsToggle } from '@/features/settings/components/SettingsToggle';
-import { SettingsSubCard, SettingsField } from '@/features/settings/components/SettingsSubCard';
+import { SettingsField, SettingsGroup, SettingsSubCard, SettingsSubSection, SettingsToggle } from '@/features/settings';
 import { useHubStore } from './hubStore';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Radio } from 'lucide-react';
