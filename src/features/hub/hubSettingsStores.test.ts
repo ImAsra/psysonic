@@ -37,13 +37,28 @@ describe('hub settings stores', () => {
     expect(cat.read()).toEqual(value);
   });
 
-  it('applies loudness values that go through store setters', () => {
-    const cat = category('loudness');
-    const value = { ...cat.read(), replayGainPreGainDb: -4, replayGainFallbackDb: -9 };
+  it('applies loudness values through the store setters', () => {
+    // The setters also refresh the playing track's ReplayGain; a plain state write would not.
+    const original = useAuthStore.getState();
+    const setPreGain = vi.fn(original.setReplayGainPreGainDb);
+    const setFallback = vi.fn(original.setReplayGainFallbackDb);
+    useAuthStore.setState({ setReplayGainPreGainDb: setPreGain, setReplayGainFallbackDb: setFallback });
 
-    cat.apply(value);
+    try {
+      const cat = category('loudness');
+      const value = { ...cat.read(), replayGainPreGainDb: -4, replayGainFallbackDb: -9 };
 
-    expect(cat.read()).toEqual(value);
+      cat.apply(value);
+
+      expect(setPreGain).toHaveBeenCalledWith(-4);
+      expect(setFallback).toHaveBeenCalledWith(-9);
+      expect(cat.read()).toEqual(value);
+    } finally {
+      useAuthStore.setState({
+        setReplayGainPreGainDb: original.setReplayGainPreGainDb,
+        setReplayGainFallbackDb: original.setReplayGainFallbackDb,
+      });
+    }
   });
 
   it('ignores keys that are not part of the category', () => {

@@ -27,6 +27,8 @@ const REFUSED: Record<number, HubTestProblem> = {
 
 type SocketCtor = new (url: string) => WebSocket;
 
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
 /**
  * Signs in to the hub once with this address and token, the way the app does, and reports what
  * happened. It joins as a short-lived remote (not a player), so other devices never see it as a
@@ -66,14 +68,17 @@ export function testHubConnection(
     ws.onopen = () =>
       ws.send(JSON.stringify({ t: 'hello', v: PROTOCOL, token, deviceId, name: 'Psysonic connection test', kind: 'web' }));
     ws.onmessage = ev => {
-      let m: { t?: string; devices?: { kind?: string; id?: string }[] };
+      let m: unknown;
       try {
         m = JSON.parse(String(ev.data));
       } catch {
         return finish({ kind: 'not_a_hub' });
       }
+      if (!isObject(m)) return finish({ kind: 'not_a_hub' });
       if (m.t !== 'welcome') return;
-      const players = (m.devices ?? []).filter(d => d.kind !== 'web' && d.id !== deviceId).length;
+      const devices = m.devices ?? [];
+      if (!Array.isArray(devices) || !devices.every(isObject)) return finish({ kind: 'not_a_hub' });
+      const players = devices.filter(d => d.kind !== 'web' && d.id !== deviceId).length;
       finish({ kind: 'ok', players });
     };
     ws.onclose = ev => finish({ kind: REFUSED[ev.code] ?? 'unreachable' });

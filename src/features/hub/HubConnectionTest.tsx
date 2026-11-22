@@ -4,18 +4,23 @@ import { CheckCircle2, Wifi, WifiOff } from 'lucide-react';
 import { useHubStore } from './hubStore';
 import { testHubConnection, type HubTestResult } from './testHubConnection';
 
-/** "Test connection": signs in once with the address and token above and says what happened. */
+/**
+ * "Test connection": signs in once with the address and token above and says what happened. The
+ * result is only shown while they are still the ones it tested.
+ */
 export function HubConnectionTest() {
   const { t } = useTranslation();
   const url = useHubStore(s => s.url);
   const token = useHubStore(s => s.token);
   const [testing, setTesting] = useState(false);
-  const [result, setResult] = useState<HubTestResult | null>(null);
+  const [tested, setTested] = useState<{ url: string; token: string; result: HubTestResult } | null>(null);
+  const result = tested && tested.url === url && tested.token === token ? tested.result : null;
 
   const run = async () => {
     setTesting(true);
-    setResult(null);
-    setResult(await testHubConnection(url, token));
+    setTested(null);
+    const outcome = await testHubConnection(url, token);
+    setTested({ url, token, result: outcome });
     setTesting(false);
   };
 

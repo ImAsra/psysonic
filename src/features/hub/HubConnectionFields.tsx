@@ -25,6 +25,7 @@ export function HubConnectionFields() {
           value={url}
           onChange={e => set.setUrl(e.target.value)}
           placeholder={t('settings.hubUrlPlaceholder')}
+          aria-label={t('settings.hubUrl')}
           autoComplete="off"
           spellCheck={false}
         />
@@ -44,6 +45,7 @@ export function HubConnectionFields() {
             type={showToken ? 'text' : 'password'}
             value={token}
             onChange={e => set.setToken(e.target.value)}
+            aria-label={t('settings.hubToken')}
             autoComplete="off"
             spellCheck={false}
           />
@@ -65,6 +67,7 @@ export function HubConnectionFields() {
           type="text"
           value={deviceName}
           onChange={e => set.setDeviceName(e.target.value)}
+          aria-label={t('settings.hubDeviceName')}
           autoComplete="off"
         />
       </SettingsField>

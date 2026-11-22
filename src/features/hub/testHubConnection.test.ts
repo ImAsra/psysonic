@@ -81,6 +81,15 @@ describe('testHubConnection', () => {
     expect(await result).toEqual({ kind: 'not_a_hub' });
   });
 
+  it('JSON that is not a hub message is not a hub, not a timeout', async () => {
+    for (const data of ['null', '42', '[]', { t: 'welcome', devices: {} }, { t: 'welcome', devices: [null] }]) {
+      const result = testHubConnection('http://10.0.0.9:80', 't0ken', { Socket, timeoutMs: 1000 });
+      FakeSocket.last.open();
+      FakeSocket.last.receive(data);
+      expect(await result).toEqual({ kind: 'not_a_hub' });
+    }
+  });
+
   it('gives up after the timeout when the hub never answers', async () => {
     const result = testHubConnection('http://10.0.0.9:5533', 't0ken', { Socket, timeoutMs: 1000 });
     FakeSocket.last.open();
