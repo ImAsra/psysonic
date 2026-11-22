@@ -916,7 +916,7 @@ export const settings = {
   backupOverlayExportTitle: 'Oppretter sikkerhetskopi…',
   backupOverlayImportTitle: 'Gjenoppretter sikkerhetskopi…',
   backupOverlayHint: 'Du kan holde vinduet åpent mens vi behandler filer. Inndata er midlertidig låst.',
-  hubTitle: 'Sanntidshub (valgfritt)',
+  hubTitle: 'Sanntidshub',
   hubGroup: 'Egenhostet hub',
   hubDescription: 'Umiddelbar synkronisering og fjernstyring mellom enhetene dine via din egen psysonic-hub-container. La den være av for å beholde vanlig synkronisering av Subsonic-køen.',
   hubEnable: 'Aktiver sanntidshub',

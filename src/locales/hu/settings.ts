@@ -913,7 +913,7 @@ export const settings = {
   squareCornersSub: 'A kártyák lekerekített sarkainak eltávolítása éles, szögletes megjelenésért',
   uiScaleTitle: 'Felület méretezése',
   uiScaleLabel: 'Nagyítás',
-  hubTitle: 'Valós idejű hub (opcionális)',
+  hubTitle: 'Valós idejű hub',
   hubGroup: 'Saját üzemeltetésű hub',
   hubDescription: 'Azonnali szinkronizálás és távoli vezérlés az eszközeid között a saját psysonic-hub konténereden keresztül. Hagyd kikapcsolva, ha a szokásos Subsonic várólista-szinkronizálást szeretnéd használni.',
   hubEnable: 'Valós idejű hub engedélyezése',

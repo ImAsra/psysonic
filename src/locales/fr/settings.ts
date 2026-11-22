@@ -913,7 +913,7 @@ export const settings = {
   backupOverlayExportTitle: 'Création de la sauvegarde…',
   backupOverlayImportTitle: 'Restauration de la sauvegarde…',
   backupOverlayHint: 'Vous pouvez garder la fenêtre ouverte pendant le traitement des fichiers. La saisie est temporairement verrouillée.',
-  hubTitle: 'Hub en temps réel (facultatif)',
+  hubTitle: 'Hub en temps réel',
   hubGroup: 'Hub auto-hébergé',
   hubDescription: 'Synchronisation instantanée et contrôle à distance entre vos appareils grâce à votre propre conteneur psysonic-hub. Laissez cette option désactivée pour conserver la synchronisation habituelle de la file Subsonic.',
   hubEnable: 'Activer le hub en temps réel',

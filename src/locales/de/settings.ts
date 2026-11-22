@@ -913,7 +913,7 @@ export const settings = {
   backupOverlayExportTitle: 'Backup wird erstellt…',
   backupOverlayImportTitle: 'Backup wird wiederhergestellt…',
   backupOverlayHint: 'Das Fenster kann geöffnet bleiben, während wir Dateien verarbeiten. Eingaben sind vorübergehend gesperrt.',
-  hubTitle: 'Echtzeit-Hub (optional)',
+  hubTitle: 'Echtzeit-Hub',
   hubGroup: 'Selbst gehosteter Hub',
   hubDescription: 'Sofortige Synchronisierung und Fernsteuerung zwischen deinen Geräten über deinen eigenen psysonic-hub-Container. Deaktiviert lassen, um die normale Subsonic-Warteschlangensynchronisierung zu verwenden.',
   hubEnable: 'Echtzeit-Hub aktivieren',

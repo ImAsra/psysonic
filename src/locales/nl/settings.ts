@@ -913,7 +913,7 @@ export const settings = {
   backupOverlayExportTitle: 'Back-up maken…',
   backupOverlayImportTitle: 'Back-up herstellen…',
   backupOverlayHint: 'Je kunt het venster open laten terwijl we bestanden verwerken. Invoer is tijdelijk vergrendeld.',
-  hubTitle: 'Realtimehub (optioneel)',
+  hubTitle: 'Realtimehub',
   hubGroup: 'Zelfgehoste hub',
   hubDescription: 'Directe synchronisatie en bediening op afstand tussen je apparaten via je eigen psysonic-hub-container. Laat dit uitgeschakeld om de normale Subsonic-wachtrijsynchronisatie te behouden.',
   hubEnable: 'Realtimehub inschakelen',

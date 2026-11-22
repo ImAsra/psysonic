@@ -913,7 +913,7 @@ export const settings = {
   backupOverlayExportTitle: 'Se creează backup-ul…',
   backupOverlayImportTitle: 'Se restaurează backup-ul…',
   backupOverlayHint: 'Poți lăsa fereastra deschisă cât timp procesăm fișierele. Introducerea este blocată temporar.',
-  hubTitle: 'Hub în timp real (opțional)',
+  hubTitle: 'Hub în timp real',
   hubGroup: 'Hub găzduit independent',
   hubDescription: 'Sincronizare instantanee și control de la distanță între dispozitivele tale prin propriul container psysonic-hub. Lasă opțiunea dezactivată pentru a păstra sincronizarea obișnuită a cozii Subsonic.',
   hubEnable: 'Activează hub-ul în timp real',

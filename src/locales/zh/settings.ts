@@ -912,7 +912,7 @@ export const settings = {
   backupOverlayExportTitle: '正在创建备份…',
   backupOverlayImportTitle: '正在恢复备份…',
   backupOverlayHint: '处理文件时你可以保持窗口打开。输入会暂时锁定。',
-  hubTitle: '实时 Hub（可选）',
+  hubTitle: '实时 Hub',
   hubGroup: '自托管 Hub',
   hubDescription: '通过你自己的 psysonic-hub 容器，在设备之间即时同步并进行远程控制。关闭此选项即可继续使用常规的 Subsonic 队列同步。',
   hubEnable: '启用实时 Hub',

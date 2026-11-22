@@ -915,7 +915,7 @@ export const settings = {
   squareCornersSub: 'Rimuove gli angoli arrotondati dalle schede per un aspetto netto e squadrato',
   uiScaleTitle: 'Scala dell’interfaccia',
   uiScaleLabel: 'Zoom',
-  hubTitle: 'Hub in tempo reale (opzionale)',
+  hubTitle: 'Hub in tempo reale',
   hubGroup: 'Hub self-hosted',
   hubDescription: 'Sincronizzazione istantanea e controllo remoto tra i tuoi dispositivi tramite il tuo container psysonic-hub. Lascialo disattivato per mantenere la normale sincronizzazione della coda Subsonic.',
   hubEnable: 'Attiva hub in tempo reale',

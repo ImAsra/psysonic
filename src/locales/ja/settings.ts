@@ -907,7 +907,7 @@ export const settings = {
   squareCornersSub: 'カードの角の丸みをなくして、シャープで角ばった見た目にする',
   uiScaleTitle: 'インターフェース倍率',
   uiScaleLabel: 'ズーム',
-  hubTitle: 'リアルタイムハブ（オプション）',
+  hubTitle: 'リアルタイムハブ',
   hubGroup: 'セルフホスト型ハブ',
   hubDescription: '独自の psysonic-hub コンテナを使用して、デバイス間で即時同期とリモート操作を行います。通常の Subsonic キュー同期を使用する場合はオフのままにしてください。',
   hubEnable: 'リアルタイムハブを有効にする',

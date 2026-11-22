@@ -913,7 +913,7 @@ export const settings = {
   squareCornersSub: 'Usuń zaokrąglone rogi kart, aby uzyskać ostry, kanciasty wygląd',
   uiScaleTitle: 'Skala interfejsu',
   uiScaleLabel: 'Przybliżenie',
-  hubTitle: 'Hub czasu rzeczywistego (opcjonalny)',
+  hubTitle: 'Hub czasu rzeczywistego',
   hubGroup: 'Samodzielnie hostowany hub',
   hubDescription: 'Natychmiastowa synchronizacja i zdalne sterowanie między urządzeniami za pomocą własnego kontenera psysonic-hub. Pozostaw tę opcję wyłączoną, aby zachować zwykłą synchronizację kolejki Subsonic.',
   hubEnable: 'Włącz hub czasu rzeczywistego',

@@ -913,7 +913,7 @@ export const settings = {
   backupOverlayExportTitle: 'Creando copia…',
   backupOverlayImportTitle: 'Restaurando copia…',
   backupOverlayHint: 'Puedes mantener la ventana abierta mientras procesamos archivos. La entrada está bloqueada temporalmente.',
-  hubTitle: 'Hub en tiempo real (opcional)',
+  hubTitle: 'Hub en tiempo real',
   hubGroup: 'Hub autoalojado',
   hubDescription: 'Sincronización instantánea y control remoto entre tus dispositivos mediante tu propio contenedor psysonic-hub. Déjalo desactivado para mantener la sincronización habitual de la cola de Subsonic.',
   hubEnable: 'Activar el hub en tiempo real',

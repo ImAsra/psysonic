@@ -913,7 +913,7 @@ export const settings = {
   squareCornersSub: 'Remove rounded corners from cards for a sharp, square look',
   uiScaleTitle: 'Interface Scale',
   uiScaleLabel: 'Zoom',
-  hubTitle: 'Realtime hub (optional)',
+  hubTitle: 'Realtime hub',
   hubGroup: 'Self-hosted hub',
   hubDescription: 'Instant sync and remote control between your devices via your own psysonic-hub container. Leave off to keep the normal Subsonic queue sync.',
   hubEnable: 'Enable realtime hub',
