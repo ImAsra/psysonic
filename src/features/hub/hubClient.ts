@@ -26,6 +26,7 @@ import {
   queueUndoSnapshotFromState,
 } from '@/features/playback/store/queueUndo';
 import { getQueueTracksView } from '@/features/playback/store/queueTrackView';
+import { subscribeQueueResolver } from '@/features/playback/store/queueTrackResolver';
 import type { Track } from '@/lib/media/trackTypes';
 import {
   emitPlaybackProgress,
@@ -40,6 +41,8 @@ import { buildCoverArtUrl } from '@/lib/api/subsonicStreamUrl';
 import { showToast } from '@/lib/dom/toast';
 import { currentServerKeys } from './hubServerKeys';
 import { deviceCompatible } from './compat';
+import { hubQueueWindow, resolveQueuePlayIndex } from './hubQueue';
+import { hubArtwork, hubBrowse, hubPlayableTracks, type HubBrowseRequest } from './hubLibrary';
 
 /**
  * Optional realtime hub client (psysonic-hub). Does nothing unless the user
@@ -496,9 +499,40 @@ function installRemoteRouting(): () => void {
   };
 }
 
+/** A remote picked a position in this device's queue (ignored when the queue changed meanwhile). */
+function playQueueIndex(args: Record<string, unknown> | null) {
+  const p = localPlayer();
+  const tracks = getQueueTracksView(usePlayerStore.getState().queueItems);
+  const index = resolveQueuePlayIndex(tracks, args?.index, args?.trackId);
+  if (index >= 0) p.playTrack(tracks[index], undefined, undefined, undefined, index);
+}
+
+/** A remote picked an album, playlist or song from the library: play it, play it next, or add it. */
+/** Bumped by every "play this" (replace) request: a lookup that finishes after a newer one is dropped. */
+let playItemGeneration = 0;
+
+async function playLibraryItem(args: Record<string, unknown> | null) {
+  const replaces = args?.mode !== 'next' && args?.mode !== 'add';
+  const generation = replaces ? ++playItemGeneration : playItemGeneration;
+  try {
+    const tracks = await hubPlayableTracks(args?.kind, args?.id);
+    if (replaces && generation !== playItemGeneration) return; // a newer "play this" came in meanwhile
+    if (!tracks.length) return;
+    const p = localPlayer();
+    if (args?.mode === 'next') return p.playNext(tracks);
+    if (args?.mode === 'add') return p.enqueue(tracks);
+    const start = typeof args?.index === 'number' && args.index >= 0 && args.index < tracks.length ? args.index : 0;
+    p.playTrack(tracks[start], tracks, true, undefined, start);
+  } catch (e) {
+    console.error('[psysonic-hub] could not play library item', e);
+  }
+}
+
 function applyCommand(action: string, args: Record<string, unknown> | null) {
   const p = localPlayer();
   switch (action) {
+    case 'playIndex': return playQueueIndex(args);
+    case 'playItem': return void playLibraryItem(args);
     case 'play': return p.resume();
     case 'pause': return p.pause();
     case 'toggle': return p.togglePlay();
@@ -567,6 +601,30 @@ const syncRemoteRouting = () => {
   };
   hubSender = send;
   const sendState = () => send({ t: 'state', state: snapshot() });
+  // Remotes show the queue of the playing device. A controller's local queue is only a mirror, so it stays quiet.
+  // The last window sent, so a track resolving outside it (or the same data again) sends nothing.
+  let lastQueueJson = '';
+  const sendQueue = () => {
+    if (getHubRemote()) return;
+    const p = usePlayerStore.getState();
+    const queue = hubQueueWindow(getQueueTracksView(p.queueItems), p.queueIndex);
+    const json = JSON.stringify(queue);
+    if (json === lastQueueJson) return;
+    lastQueueJson = json;
+    send({ t: 'queue', queue });
+  };
+  const answerBrowse = async (rid: unknown, req: unknown) => {
+    try {
+      send({ t: 'browse-result', rid, result: await hubBrowse(req as HubBrowseRequest) });
+    } catch (e) {
+      console.error('[psysonic-hub] browse failed', e);
+      send({ t: 'browse-result', rid, error: 'lookup_failed' });
+    }
+  };
+  const answerArt = async (rid: unknown, coverArt: unknown, size: unknown) => {
+    const art = typeof coverArt === 'string' ? await hubArtwork(coverArt, Number(size) || 160) : null;
+    send({ t: 'art', rid, ...(art ?? {}) });
+  };
 
   // The playing device shares its current cover with the hub (for the web page and REST clients).
   // The hub never talks to your music server, so the image comes from here.
@@ -645,7 +703,9 @@ const syncRemoteRouting = () => {
             remoteStateAt: Date.now(),
           });
           sendState();
-          coverSentFor = ''; // a (re)connected hub has no cover yet
+          lastQueueJson = ''; // a (re)connected hub has no queue yet
+          sendQueue();
+          coverSentFor = ''; // nor a cover
           if (usePlayerStore.getState().isPlaying) void sendCover();
           settingsSync.onWelcome(
             (m.settings ?? {}) as Record<string, Record<string, unknown>>,
@@ -696,6 +756,12 @@ const syncRemoteRouting = () => {
           break;
         case 'transfer-failed':
           reportTransferFailed(String(m.reason));
+          break;
+        case 'browse':
+          void answerBrowse(m.rid, m.req);
+          break;
+        case 'art-request':
+          void answerArt(m.rid, m.coverArt, m.size);
           break;
       }
     };
@@ -752,7 +818,13 @@ const syncRemoteRouting = () => {
   let lastTrackId = usePlayerStore.getState().currentTrack?.id;
   let seekTimer: ReturnType<typeof setTimeout> | undefined;
   let queueTimer: ReturnType<typeof setTimeout> | undefined;
+  let queueWindowTimer: ReturnType<typeof setTimeout> | undefined;
   let liveTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleQueue = () => {
+    if (gaveUp) return;
+    clearTimeout(queueWindowTimer);
+    queueWindowTimer = setTimeout(sendQueue, 300);
+  };
   const unsubPlayer = usePlayerStore.subscribe((s, prev) => {
     // Keep our clock exact across pause/resume and track changes.
     if (s.isPlaying !== wasPlaying) {
@@ -774,6 +846,12 @@ const syncRemoteRouting = () => {
 
     // The playing device shares its cover art with the hub.
     if (s.isPlaying && s.currentTrack?.id && s.currentTrack.id !== coverSentFor && !gaveUp) void sendCover();
+
+    // Remotes see the queue window; a new current track moves it too. Starting to play counts as
+    // well: a device that was idle may never have sent its queue, and it is the one remotes show now.
+    if (s.queueItems !== prev.queueItems || s.queueIndex !== prev.queueIndex || (s.isPlaying && !prev.isPlaying)) {
+      scheduleQueue();
+    }
 
     // A real queue edit (not one we applied from the server): push + signal the others.
     if (s.queueItems !== prev.queueItems && s.queueItems !== lastAppliedQueue && !forceLocal) {
@@ -802,6 +880,18 @@ const syncRemoteRouting = () => {
     tickGuardUntil = Date.now() + 800;
     clearTimeout(seekTimer);
     seekTimer = setTimeout(() => { if (!gaveUp) sendState(); }, 120); // debounce drags
+  });
+
+  // While another device played, this one stayed quiet about its queue (it only mirrored). Once it is
+  // no longer mirroring (it took over, or the other device stopped), its own queue is the real one again.
+  // A restored queue starts with placeholders for tracks not looked up yet; resend once they resolve.
+  const unsubResolver = subscribeQueueResolver(scheduleQueue);
+
+  let wasMirroring = !!getHubRemote();
+  const unsubRemote = useHubStore.subscribe(() => {
+    const mirroring = !!getHubRemote();
+    if (wasMirroring && !mirroring) scheduleQueue();
+    wasMirroring = mirroring;
   });
 
   // The user switched music server / account while connected: tell the hub.
@@ -834,9 +924,12 @@ const syncRemoteRouting = () => {
     unsubProgress();
     settingsSync.dispose();
     unsubServer();
+    unsubRemote();
+    unsubResolver();
     clearTimeout(serverTimer);
     clearTimeout(seekTimer);
     clearTimeout(queueTimer);
+    clearTimeout(queueWindowTimer);
     clearTimeout(liveTimer);
     clearTimeout(settingsConnectTimer);
     teardown();
