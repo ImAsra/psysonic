@@ -106,4 +106,13 @@ export const player = {
   hubTransferQueueUnavailable: 'Другому устройству не удалось загрузить очередь.',
   hubTransferDeviceCannotPlay: 'Это устройство не может воспроизводить аудио.',
   hubTransferFailed: 'Не удалось выполнить передачу.',
+  hubControl: 'Управление через хаб',
+  hubControlOnHint: 'Другие устройства могут видеть это устройство, воспроизводить на нём и управлять им.',
+  hubControlOffHint: 'Играет само по себе. Другие устройства не могут поставить его на паузу или управлять им.',
+  hubOnItsOwn: 'Играет само по себе',
+  hubAlsoPlaying: '{{name}} тоже играет.',
+  hubJoin: 'Присоединиться',
+  hubJoinHint: 'Остановить здесь и управлять {{name}}',
+  hubPlayHere: 'Играть здесь',
+  hubPlayHereHint: '{{name}} встанет на паузу',
 };

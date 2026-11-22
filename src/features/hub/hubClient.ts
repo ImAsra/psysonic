@@ -72,6 +72,25 @@ export function toHubWsUrl(input: string): string | null {
 
 let hubSender: ((msg: unknown) => void) | null = null;
 
+/**
+ * Off hub control (hubStore.joined): this device only watches. It joins like a web page under its own
+ * id, so the hub never takes it for the player, and sends nothing after its hello.
+ */
+const watching = () => !useHubStore.getState().joined;
+export const watcherId = (deviceId: string) => `${deviceId}-watch`;
+
+/** Whether this device's own player is playing (for the Hub control switch). */
+export const isPlayingHere = () => usePlayerStore.getState().isPlaying;
+
+/**
+ * Back under hub control. "join": stop here and control what the hub plays. "playHere": keep playing;
+ * on rejoining this device reports it is playing, so the hub makes it the player and pauses the other.
+ */
+export function rejoinHub(choice: 'join' | 'playHere' = 'playHere'): void {
+  if (choice === 'join' && usePlayerStore.getState().isPlaying) usePlayerStore.getState().pause();
+  useHubStore.getState().setJoined(true);
+}
+
 /** Ask the hub to move playback to another device (this one included). */
 export function hubTransferTo(deviceId: string) {
   hubSender?.({ t: 'transfer', to: deviceId });
@@ -237,7 +256,8 @@ function markQueueApplied() {
 }
 
 async function pushQueueAndSignal() {
-  if (!isPlayQueueSyncEnabled() || useHubStore.getState().status !== 'connected') return;
+  // On its own, this device's queue is its own business: saving it would overwrite the shared one.
+  if (watching() || !isPlayQueueSyncEnabled() || useHubStore.getState().status !== 'connected') return;
   const p = usePlayerStore.getState();
   const remote = getHubRemote();
   // As a controller, save the ACTIVE device's track/position, not our idle local ones.
@@ -597,6 +617,7 @@ const syncRemoteRouting = () => {
   const setRuntime = useHubStore.getState().setRuntime;
 
   const send = (msg: unknown) => {
+    if (watching() && (msg as { t?: unknown })?.t !== 'hello') return; // a watcher only says hello
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   };
   hubSender = send;
@@ -683,15 +704,39 @@ const syncRemoteRouting = () => {
     ws = sock;
 
     sock.onopen = () => {
+      if (watching()) {
+        send({ t: 'hello', v: PROTOCOL, token, deviceId: watcherId(deviceId), name: deviceName, kind: 'web' });
+        return;
+      }
       void currentServerKeys().then(server => {
         lastServerKeys = JSON.stringify(server);
         send({ t: 'hello', v: PROTOCOL, token, deviceId, name: deviceName, kind: 'desktop', server });
       });
     };
 
+    // Watching: only who is there and what plays matter; commands, queues and settings are not ours.
+    const onWatchMessage = (m: HubMsg) => {
+      if (m?.t === 'welcome') {
+        attempt = 0;
+        clearInterval(heartbeat);
+        setRuntime({
+          status: 'connected',
+          devices: m.devices ?? [],
+          serverCheck: m.serverCheck !== false,
+          remoteState: m.state ?? null,
+          remoteStateAt: Date.now(),
+        });
+      } else if (m?.t === 'devices') {
+        setRuntime({ devices: m.devices ?? [] });
+      } else if (m?.t === 'state') {
+        setRuntime({ remoteState: m.state ?? null, remoteStateAt: Date.now() });
+      }
+    };
+
     sock.onmessage = ev => {
       let m: HubMsg;
       try { m = JSON.parse(String(ev.data)) as HubMsg; } catch { return; }
+      if (watching()) return onWatchMessage(m);
       switch (m?.t) {
         case 'welcome':
           attempt = 0;
@@ -788,7 +833,7 @@ const syncRemoteRouting = () => {
       settingsSync.refresh();
    }
 
-   if (s.enabled !== prev.enabled) {
+   if (s.enabled !== prev.enabled || s.joined !== prev.joined) {
      clearTimeout(settingsConnectTimer);
       settingsConnectTimer = undefined;
       gaveUp = false;

@@ -106,4 +106,13 @@ export const player = {
   hubTransferQueueUnavailable: 'Drugie urządzenie nie mogło załadować kolejki.',
   hubTransferDeviceCannotPlay: 'To urządzenie nie może odtwarzać dźwięku.',
   hubTransferFailed: 'Transfer nie powiódł się.',
+  hubControl: 'Sterowanie z huba',
+  hubControlOnHint: 'Inne urządzenia mogą widzieć to urządzenie, odtwarzać na nim i nim sterować.',
+  hubControlOffHint: 'Gra samodzielnie. Inne urządzenia nie mogą go wstrzymać ani nim sterować.',
+  hubOnItsOwn: 'Gra samodzielnie',
+  hubAlsoPlaying: '{{name}} też gra.',
+  hubJoin: 'Dołącz',
+  hubJoinHint: 'Zatrzymaj tutaj i steruj {{name}}',
+  hubPlayHere: 'Graj tutaj',
+  hubPlayHereHint: '{{name}} się wstrzyma',
 };

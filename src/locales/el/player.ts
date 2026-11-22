@@ -106,4 +106,13 @@ export const player = {
   hubTransferQueueUnavailable: 'Η άλλη συσκευή δεν μπόρεσε να φορτώσει την ουρά.',
   hubTransferDeviceCannotPlay: 'Αυτή η συσκευή δεν μπορεί να αναπαράγει ήχο.',
   hubTransferFailed: 'Η μεταφορά απέτυχε.',
+  hubControl: 'Έλεγχος από τον κόμβο',
+  hubControlOnHint: 'Οι άλλες συσκευές μπορούν να τη βλέπουν, να παίζουν σε αυτή και να την ελέγχουν.',
+  hubControlOffHint: 'Αναπαράγει αυτόνομα. Οι άλλες συσκευές δεν μπορούν να την παύσουν ή να την ελέγξουν.',
+  hubOnItsOwn: 'Αναπαράγει αυτόνομα',
+  hubAlsoPlaying: 'Η συσκευή {{name}} αναπαράγει επίσης.',
+  hubJoin: 'Συμμετοχή',
+  hubJoinHint: 'Διακοπή εδώ και έλεγχος της συσκευής {{name}}',
+  hubPlayHere: 'Αναπαραγωγή εδώ',
+  hubPlayHereHint: 'Η συσκευή {{name}} μπαίνει σε παύση',
 };

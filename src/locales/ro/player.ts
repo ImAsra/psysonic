@@ -106,4 +106,13 @@ export const player = {
   hubTransferQueueUnavailable: 'Celălalt dispozitiv nu a putut încărca coada.',
   hubTransferDeviceCannotPlay: 'Acest dispozitiv nu poate reda audio.',
   hubTransferFailed: 'Transferul nu a reușit.',
+  hubControl: 'Control din hub',
+  hubControlOnHint: 'Celelalte dispozitive pot vedea acest dispozitiv, pot reda pe el și îl pot controla.',
+  hubControlOffHint: 'Redă independent. Celelalte dispozitive nu îl pot pune pe pauză și nu îl pot controla.',
+  hubOnItsOwn: 'Redă independent',
+  hubAlsoPlaying: '{{name}} redă și el.',
+  hubJoin: 'Alătură-te',
+  hubJoinHint: 'Oprește aici și controlează {{name}}',
+  hubPlayHere: 'Redă aici',
+  hubPlayHereHint: '{{name}} intră pe pauză',
 };

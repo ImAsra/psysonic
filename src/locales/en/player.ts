@@ -106,4 +106,13 @@ export const player = {
   hubTransferQueueUnavailable: 'The other device could not load the queue.',
   hubTransferDeviceCannotPlay: 'That device cannot play audio.',
   hubTransferFailed: 'The transfer did not go through.',
+  hubControl: 'Hub control',
+  hubControlOnHint: 'Other devices can see, play on and control this one.',
+  hubControlOffHint: 'Playing on its own. Other devices can\'t pause or control it.',
+  hubOnItsOwn: 'Playing on its own',
+  hubAlsoPlaying: '{{name}} is playing too.',
+  hubJoin: 'Join',
+  hubJoinHint: 'Stop here and control {{name}}',
+  hubPlayHere: 'Play here',
+  hubPlayHereHint: '{{name}} pauses',
 };

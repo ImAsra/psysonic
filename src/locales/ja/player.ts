@@ -106,4 +106,13 @@ export const player = {
   hubTransferQueueUnavailable: 'もう一方のデバイスでキューを読み込めませんでした。',
   hubTransferDeviceCannotPlay: 'このデバイスでは音声を再生できません。',
   hubTransferFailed: '転送に失敗しました。',
+  hubControl: 'ハブによる操作',
+  hubControlOnHint: '他のデバイスからこのデバイスを表示・再生先に指定・操作できます。',
+  hubControlOffHint: '単独で再生中。他のデバイスから一時停止や操作はできません。',
+  hubOnItsOwn: '単独で再生中',
+  hubAlsoPlaying: '{{name}} でも再生中です。',
+  hubJoin: '参加',
+  hubJoinHint: 'ここを止めて {{name}} を操作',
+  hubPlayHere: 'ここで再生',
+  hubPlayHereHint: '{{name}} は一時停止します',
 };

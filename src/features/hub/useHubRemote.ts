@@ -11,6 +11,8 @@ export interface HubRemote {
 
 type Snap = {
   status: string;
+  /** Off: this device plays on its own and never mirrors another one. */
+  joined: boolean;
   devices: HubDevice[];
   deviceId: string;
   remoteState: HubRemoteState | null;
@@ -19,7 +21,7 @@ type Snap = {
 
 /** Non-null while ANOTHER device is the active player (Spotify Connect style). */
 export function selectHubRemote(s: Snap): HubRemote | null {
-  if (s.status !== 'connected') return null;
+  if (s.status !== 'connected' || !s.joined) return null;
   const device = s.devices.find(d => d.active && d.id !== s.deviceId && d.kind !== 'web');
   if (!device || !s.remoteState || s.remoteState.from !== device.id) return null;
   return { device, state: s.remoteState, stateAt: s.remoteStateAt };
@@ -40,11 +42,12 @@ export function remotePosition(state: HubRemoteState, stateAt: number, now = Dat
  */
 export function useHubRemote() {
   const status = useHubStore(s => s.status);
+  const joined = useHubStore(s => s.joined);
   const devices = useHubStore(s => s.devices);
   const deviceId = useHubStore(s => s.deviceId);
   const remoteState = useHubStore(s => s.remoteState);
   const remoteStateAt = useHubStore(s => s.remoteStateAt);
-  const remote = selectHubRemote({ status, devices, deviceId, remoteState, remoteStateAt });
+  const remote = selectHubRemote({ status, joined, devices, deviceId, remoteState, remoteStateAt });
 
   const remoteTrack = useHubStore(s => s.remoteTrack);
 

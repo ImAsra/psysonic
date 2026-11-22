@@ -106,4 +106,13 @@ export const player = {
   hubTransferQueueUnavailable: 'El otro dispositivo no pudo cargar la cola.',
   hubTransferDeviceCannotPlay: 'Ese dispositivo no puede reproducir audio.',
   hubTransferFailed: 'No se pudo completar la transferencia.',
+  hubControl: 'Control del hub',
+  hubControlOnHint: 'Los demás dispositivos pueden ver, reproducir en y controlar este.',
+  hubControlOffHint: 'Reproduce por su cuenta. Los demás dispositivos no pueden pausarlo ni controlarlo.',
+  hubOnItsOwn: 'Reproduce por su cuenta',
+  hubAlsoPlaying: '{{name}} también está reproduciendo.',
+  hubJoin: 'Unirse',
+  hubJoinHint: 'Parar acá y controlar {{name}}',
+  hubPlayHere: 'Reproducir acá',
+  hubPlayHereHint: '{{name}} se pausa',
 };

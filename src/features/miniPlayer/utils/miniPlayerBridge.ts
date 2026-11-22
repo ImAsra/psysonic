@@ -81,7 +81,8 @@ function snapshot(): MiniSyncPayload {
     crossfadeTrimSilence: !!a.crossfadeTrimSilence,
     infiniteQueueEnabled: !!a.infiniteQueueEnabled,
     isMobile: false,
-    hub: hubState.status === 'connected'
+    // On its own (hub control off) this device can't move playback, so the mini shows no picker.
+    hub: hubState.status === 'connected' && hubState.joined
       ? { myId: hubState.deviceId, devices: hubState.devices.filter(d => d.kind !== 'web'), serverCheck: hubState.serverCheck }
       : null,
   };

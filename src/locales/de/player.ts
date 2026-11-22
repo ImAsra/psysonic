@@ -106,4 +106,13 @@ export const player = {
   hubTransferQueueUnavailable: 'Das andere Gerät konnte die Warteschlange nicht laden.',
   hubTransferDeviceCannotPlay: 'Dieses Gerät kann keine Audiodateien abspielen.',
   hubTransferFailed: 'Die Übertragung ist fehlgeschlagen.',
+  hubControl: 'Hub-Steuerung',
+  hubControlOnHint: 'Andere Geräte können dieses sehen, darauf abspielen und es steuern.',
+  hubControlOffHint: 'Spielt eigenständig. Andere Geräte können es weder pausieren noch steuern.',
+  hubOnItsOwn: 'Spielt eigenständig',
+  hubAlsoPlaying: '{{name}} spielt auch gerade.',
+  hubJoin: 'Beitreten',
+  hubJoinHint: 'Hier anhalten und {{name}} steuern',
+  hubPlayHere: 'Hier abspielen',
+  hubPlayHereHint: '{{name}} pausiert',
 };

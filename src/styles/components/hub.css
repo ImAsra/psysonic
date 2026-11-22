@@ -86,3 +86,92 @@
 .hub-device-row:disabled:hover {
   background: transparent;
 }
+/* What the playing device plays, under its name. */
+.hub-device-row__playing {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+}
+
+/* Off hub control the list is only for looking: no hover, no pointer. */
+.hub-device-row--info {
+  cursor: default;
+}
+.hub-device-row--info:hover {
+  background: transparent;
+}
+.hub-device-row--info.hub-device-row--active:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* The Play on button while this device plays on its own. */
+.hub-picker--alone {
+  opacity: 0.5;
+}
+
+/* "Hub control" switch, and the choice when rejoining while another device plays. */
+.hub-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 10px 10px 6px;
+  border-top: 1px solid var(--border);
+}
+.hub-control__text {
+  flex: 1;
+  min-width: 0;
+}
+.hub-control__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.hub-control__hint {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+.hub-control--ask {
+  flex-direction: column;
+  align-items: stretch;
+}
+.hub-control--ask .hub-control__text {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.hub-control__choices {
+  display: flex;
+  gap: 6px;
+}
+.hub-control__choice {
+  all: unset;
+  box-sizing: border-box;
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.hub-control__choice:hover,
+.hub-control__choice:focus-visible {
+  background: var(--bg-hover);
+}
+.hub-control__choice:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.hub-control__choice-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.hub-control__choice .hub-control__hint {
+  display: block;
+}
