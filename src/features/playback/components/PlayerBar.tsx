@@ -34,7 +34,7 @@ import { PlayerOverflowMenu } from '@/features/playback/components/playerBar/Pla
 import { ScrobbleActionButton } from '@/features/playback/components/playerBar/ScrobbleStatus';
 import { useFloatingPlayerBar } from '@/features/playback/hooks/useFloatingPlayerBar';
 import { useUtilityOverflowMenu } from '@/features/playback/hooks/useUtilityOverflowMenu';
-import { HubDevicePicker, useHubRemote } from '@/features/hub';
+import { HubDevicePicker, HubPlayingOnStrip, useHubRemote } from '@/features/hub';
 import {
   usePlayerBarLayoutStore,
   type PlayerBarLayoutItemId,
@@ -375,6 +375,7 @@ export default function PlayerBar() {
       )}
 
     </footer>
+    <HubPlayingOnStrip anchor={playerBarRef} />
     <PlaybackDelayModal open={delayModalOpen} onClose={() => setDelayModalOpen(false)} anchorRef={transportAnchorRef} />
     </>
   );

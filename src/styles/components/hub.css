@@ -175,3 +175,38 @@
 .hub-control__choice .hub-control__hint {
   display: block;
 }
+
+/* "Playing on …" strip on the top edge of the player bar while another device plays (fixed;
+   left, width and bottom come from the bar's position). The popover anchors to its right end. */
+.hub-playing-on-strip {
+  all: unset;
+  position: fixed;
+  z-index: 1001;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  height: 22px;
+  padding: 0 var(--space-5, 20px);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-on-accent, #11111b);
+  background: var(--accent);
+  border-radius: var(--radius-sm, 8px) var(--radius-sm, 8px) 0 0;
+  cursor: pointer;
+}
+.hub-playing-on-strip:hover {
+  filter: brightness(1.06);
+}
+.hub-playing-on-strip:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: -3px;
+}
+/* Over the floating (pill) bar: a small pill above its right end instead of a band. */
+.hub-playing-on-strip--floating {
+  height: 24px;
+  padding: 0 12px;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
