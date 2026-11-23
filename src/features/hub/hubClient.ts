@@ -57,6 +57,7 @@ import { hubArtwork, hubBrowse, hubPlayableTracks, type HubBrowseRequest } from 
 
 const PROTOCOL = 1;
 const HEARTBEAT_MS = 5_000;
+const CATCH_UP_RETRY_MS = 5_000;
 const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 
 /** http(s)://host:port -> ws(s)://host:port/ws ; accepts ws(s):// as-is. */
@@ -84,16 +85,19 @@ let hubSender: ((msg: unknown) => void) | null = null;
 const watching = () => !useHubStore.getState().joined;
 export const watcherId = (deviceId: string) => `${deviceId}-watch`;
 
-/** On its own, this device's queue stays its own: nothing it does may overwrite the shared server queue. */
-const queueWritesAllowed = () => {
-  const { enabled, joined } = useHubStore.getState();
-  return !enabled || joined;
-};
-
 /** Bumped whenever the hub is switched on or off or hub control changes; work started before it is stale. */
 let membership = 0;
-/** The shared queue being loaded after (re)joining; queue pushes wait for it. */
-let queueCatchUp: Promise<void> | null = null;
+/**
+ * Back under hub control, but the shared queue has not loaded here yet: the local queue is still the one
+ * this device kept on its own, so nothing may save it to the server until a load succeeds.
+ */
+let queueBehind = false;
+
+/** Nothing may overwrite the shared server queue while this device plays on its own or is still catching up. */
+const queueWritesAllowed = () => {
+  const { enabled, joined } = useHubStore.getState();
+  return !enabled || (joined && !queueBehind);
+};
 
 /** Whether this device's own player is playing (for the Hub control switch). */
 export const isPlayingHere = () => usePlayerStore.getState().isPlaying;
@@ -190,6 +194,7 @@ async function handleTakeover(
   try {
     const result = await pullQueueForTakeover(serverId);
     if (result !== 'applied' && result !== 'noop') return fail('queue_unavailable');
+    queueBehind = false; // the shared queue is loaded here now
     const player = localPlayer();
     setClock(player.currentTime, false); // position the server queue gave us
     tickGuardUntil = Date.now() + 1500;
@@ -274,9 +279,7 @@ function markQueueApplied() {
 /** `asPlayer`: this device is (becoming) the player, so save its own track even if the hub still names another. */
 async function pushQueueAndSignal(asPlayer = false) {
   // On its own, this device's queue is its own business: saving it would overwrite the shared one.
-  if (watching() || !isPlayQueueSyncEnabled() || useHubStore.getState().status !== 'connected') return;
-  await queueCatchUp; // never push a queue that has not caught up with the shared one yet
-  if (watching()) return;
+  if (watching() || queueBehind || !isPlayQueueSyncEnabled() || useHubStore.getState().status !== 'connected') return;
   const p = usePlayerStore.getState();
   const remote = asPlayer ? null : getHubRemote();
   // As a controller, save the ACTIVE device's track/position, not our idle local ones.
@@ -290,22 +293,27 @@ async function pushQueueAndSignal(asPlayer = false) {
   }
 }
 
-async function refreshQueueFromServer() {
-  if (forceLocal || !isPlayQueueSyncEnabled()) return;
+/** @returns true when the local queue now matches the shared one (loaded, already equal, or none shared). */
+async function refreshQueueFromServer(): Promise<boolean> {
+  if (!isPlayQueueSyncEnabled()) return true; // nothing is shared, so nothing to catch up with
+  if (forceLocal) return false;
   const serverId = useAuthStore.getState().activeServerId;
-  if (!serverId) return;
+  if (!serverId) return false;
   const profileId = resolveServerIdForIndexKey(serverId) || serverId;
   const startedIn = membership;
   try {
     const q = await getPlayQueueForServer(profileId);
-    if (startedIn !== membership) return; // hub control changed meanwhile: this answer is not for us now
-    if (q.songs.length === 0) return;
-    if (playQueueFingerprintsEqual(fingerprintFromServer(q), fingerprintFromLocalQueue())) return;
-    const mapped = q.songs.map(song => ({ ...songToTrack(song), serverId: profileId }));
-    applyMappedQueueProjection(mapped, q, profileId, false);
-    markQueueApplied();
+    if (startedIn !== membership) return false; // hub control changed meanwhile: this answer is not for us now
+    if (q.songs.length > 0 && !playQueueFingerprintsEqual(fingerprintFromServer(q), fingerprintFromLocalQueue())) {
+      const mapped = q.songs.map(song => ({ ...songToTrack(song), serverId: profileId }));
+      applyMappedQueueProjection(mapped, q, profileId, false);
+      markQueueApplied();
+    }
+    queueBehind = false;
+    return true;
   } catch (e) {
     console.error('[psysonic-hub] queue refresh failed', e);
+    return false;
   }
 }
 
@@ -393,6 +401,7 @@ async function remotePlayTrack(track: Track, queue?: Track[]) {
     // Silent: replaces the local queue and parks on `track` at 0:00 without audio.
     applyMappedQueue(tracks, { current: track.id, position: 0, songs: [] }, serverId, true, 0);
     markQueueApplied();
+    queueBehind = false; // the queue picked here is meant to replace the shared one
     emitMine(0, track.duration ?? 0, 0);
 
     const saved = await flushPlayQueuePosition();
@@ -698,15 +707,21 @@ const syncRemoteRouting = () => {
 
   // Joined (or reconnected): the shared queue and this device's queue must agree before anyone edits.
   // Playing here, this device's queue is the one that counts; mirroring another, take the shared one.
+  // Until a load succeeds every queue write stays held; a failed load is tried again.
+  let catchUpTimer: ReturnType<typeof setTimeout> | undefined;
   const catchUpQueue = () => {
-    if (usePlayerStore.getState().isPlaying) {
-      void pushQueueAndSignal(true);
-    } else if (getHubRemote()) {
-      const loading = refreshQueueFromServer().finally(() => {
-        if (queueCatchUp === loading) queueCatchUp = null;
-      });
-      queueCatchUp = loading;
+    clearTimeout(catchUpTimer);
+    if (useHubStore.getState().status !== 'connected') return; // still held; the next welcome catches up
+    if (!getHubRemote() || usePlayerStore.getState().isPlaying) {
+      queueBehind = false;
+      if (usePlayerStore.getState().isPlaying) void pushQueueAndSignal(true);
+      return;
     }
+    queueBehind = true;
+    const startedIn = membership;
+    void refreshQueueFromServer().then(ok => {
+      if (!ok && queueBehind && startedIn === membership) catchUpTimer = setTimeout(catchUpQueue, CATCH_UP_RETRY_MS);
+    });
   };
 
   const settingsSync = createSettingsSync({
@@ -871,7 +886,9 @@ const syncRemoteRouting = () => {
 
    if (s.enabled !== prev.enabled || s.joined !== prev.joined) {
      membership++;
-     queueCatchUp = null;
+     clearTimeout(catchUpTimer);
+     // Back from playing on its own: hold queue writes until the welcome lines the queue up.
+     queueBehind = s.enabled && s.joined && !prev.joined;
      clearTimeout(settingsConnectTimer);
       settingsConnectTimer = undefined;
       gaveUp = false;
@@ -1002,6 +1019,8 @@ const syncRemoteRouting = () => {
     stopped = true;
     hubSender = null;
     removeQueueGate();
+    clearTimeout(catchUpTimer);
+    queueBehind = false;
     uninstallRouting?.();
     uninstallRouting = null;
     unsubSettings();

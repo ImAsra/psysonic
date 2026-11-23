@@ -58,12 +58,16 @@ class FakeSocket {
 }
 
 const latest = () => FakeSocket.all[FakeSocket.all.length - 1];
-const flush = () => new Promise(r => setTimeout(r, 0));
+const flush = () => vi.advanceTimersByTimeAsync(0);
 const living = { id: 'living', name: 'Living room', kind: 'desktop', active: true };
 const me = { id: 'desk-me', name: 'Desk', kind: 'desktop', active: false };
 const song = (id: string) => ({ id, title: id, artist: 'A', album: 'X', albumId: 'X', duration: 100 });
 const track = (id: string): Track => ({ ...song(id), serverId: 'srv' });
 const queueIds = () => usePlayerStore.getState().queueItems.map(r => r.trackId);
+/** Every queue the music server was asked to save. */
+const savedQueues = () => savePlayQueueMock.mock.calls.map(call => call[0] as string[]);
+/** The queue this device kept on its own, or an edit of it, never reaches the server. */
+const savedOnlyShared = () => savedQueues().every(ids => !ids.includes('mine') && !ids.includes('extra'));
 
 /** A pending answer to getPlayQueue that the test resolves when it wants. */
 function deferredQueue() {
@@ -76,6 +80,7 @@ describe('hub client and the shared queue', () => {
   let stop: () => void;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     resetAllStores();
     FakeSocket.all = [];
     getPlayQueueMock.mockReset();
@@ -96,6 +101,7 @@ describe('hub client and the shared queue', () => {
   afterEach(() => {
     stop();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it('on its own, this device never saves its queue to the music server', async () => {
@@ -111,23 +117,48 @@ describe('hub client and the shared queue', () => {
     expect(savePlayQueueMock).toHaveBeenCalled();
   });
 
-  it('joining to control another player takes the shared queue before any edit is pushed', async () => {
+  /** Switch hub control back on with "Join" while the living room plays; the welcome starts the catch-up. */
+  async function joinLivingRoom() {
     FakeSocket.all[0].open();
-    const answer = deferredQueue();
     rejoinHub('join');
     latest().open();
     await flush();
     latest().receive({ t: 'welcome', devices: [living, me], state: { from: 'living', trackId: 'shared1', playing: true } });
+  }
 
-    // An edit while the shared queue is still loading must not reach the server.
-    usePlayerStore.setState({ queueItems: [{ serverId: 'srv', trackId: 'mine' }, { serverId: 'srv', trackId: 'extra' }] });
-    await new Promise(r => setTimeout(r, 500));
+  it('after joining, a queue edit saves nothing while the shared queue is slow to load', async () => {
+    const answer = deferredQueue();
+    await joinLivingRoom();
+
+    usePlayerStore.getState().enqueue([track('extra')]);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(savePlayQueueMock).not.toHaveBeenCalled();
 
     answer(['shared1', 'shared2']);
-    await new Promise(r => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(queueIds()).toEqual(['shared1', 'shared2']);
-    for (const call of savePlayQueueMock.mock.calls) expect(call[0]).toEqual(['shared1', 'shared2']);
+    expect(savedOnlyShared()).toBe(true);
+  });
+
+  it('after joining, a failed load keeps queue edits off the server and is tried again', async () => {
+    getPlayQueueMock.mockRejectedValueOnce(new Error('offline'));
+    await joinLivingRoom();
+    await flush();
+
+    usePlayerStore.getState().enqueue([track('extra')]);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(savePlayQueueMock).not.toHaveBeenCalled();
+    expect(queueIds()).toEqual(['mine', 'extra']);
+
+    getPlayQueueMock.mockResolvedValueOnce({ songs: [song('shared1'), song('shared2')], current: 'shared1', position: 0 });
+    await vi.advanceTimersByTimeAsync(2_000); // the retry
+    expect(queueIds()).toEqual(['shared1', 'shared2']);
+
+    // Caught up: edits save as usual again.
+    usePlayerStore.getState().enqueue([track('next')]);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(savedQueues()[savedQueues().length - 1]).toEqual(['shared1', 'shared2', 'next']);
+    expect(savedOnlyShared()).toBe(true);
   });
 
   it('a queue refresh that answers after hub control is switched off is ignored', async () => {
