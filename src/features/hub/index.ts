@@ -2,6 +2,7 @@ export { useHubConnection } from './useHubConnection';
 export { HubSettings } from './HubSettings';
 export { useHubStore } from './hubStore';
 export { HubDevicePicker } from './HubDevicePicker';
+export { HubPlayOnList } from './HubPlayOnList';
 export { useHubRemote, getHubRemote, trackFromRemoteState, remotePosition } from './useHubRemote';
 export { hubTransferTo } from './hubClient';
 export { deviceCompatible } from './compat';
