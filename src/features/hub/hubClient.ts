@@ -711,8 +711,12 @@ const syncRemoteRouting = () => {
   let catchUpTimer: ReturnType<typeof setTimeout> | undefined;
   const catchUpQueue = () => {
     clearTimeout(catchUpTimer);
-    if (useHubStore.getState().status !== 'connected') return; // still held; the next welcome catches up
-    if (!getHubRemote() || usePlayerStore.getState().isPlaying) {
+    const hub = useHubStore.getState();
+    if (hub.status !== 'connected') return; // still held; the next welcome catches up
+    // Go by who the hub says is active, not by its "now playing": right after a handoff the new player is
+    // already active while the state still comes from the previous one, so getHubRemote() is briefly null.
+    const otherActive = hub.devices.some(d => d.active && d.id !== hub.deviceId && d.kind !== 'web');
+    if (!otherActive || usePlayerStore.getState().isPlaying) {
       queueBehind = false;
       if (usePlayerStore.getState().isPlaying) void pushQueueAndSignal(true);
       return;

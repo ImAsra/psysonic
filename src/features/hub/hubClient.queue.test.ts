@@ -161,6 +161,25 @@ describe('hub client and the shared queue', () => {
     expect(savedOnlyShared()).toBe(true);
   });
 
+  it('joining right after a handoff, before the new player has reported, still takes the shared queue', async () => {
+    const answer = deferredQueue();
+    FakeSocket.all[0].open();
+    rejoinHub('join');
+    latest().open();
+    await flush();
+    // The hub already names the living room as active, but its "now playing" is still the kitchen's.
+    latest().receive({ t: 'welcome', devices: [living, me], state: { from: 'kitchen', trackId: 'old', playing: false } });
+
+    usePlayerStore.getState().enqueue([track('extra')]);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(savePlayQueueMock).not.toHaveBeenCalled();
+
+    answer(['shared1', 'shared2']);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(queueIds()).toEqual(['shared1', 'shared2']);
+    expect(savedOnlyShared()).toBe(true);
+  });
+
   it('a queue refresh that answers after hub control is switched off is ignored', async () => {
     useHubStore.setState({ joined: true });
     latest().open();
