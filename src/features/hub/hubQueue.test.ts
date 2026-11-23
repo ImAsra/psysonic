@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Track } from '@/lib/media/trackTypes';
-import { HUB_QUEUE_BEFORE, HUB_QUEUE_MAX, hubQueueWindow, resolveQueuePlayIndex } from './hubQueue';
+import { HUB_QUEUE_BEFORE, HUB_QUEUE_MAX, hubQueueWindow, resolveQueueMove, resolveQueuePlayIndex } from './hubQueue';
 
 const tracks = (n: number) =>
   Array.from({ length: n }, (_, i) => ({ id: `t${i}`, title: `Song ${i}`, duration: 100 + i }) as Track);
@@ -52,5 +52,24 @@ describe('resolveQueuePlayIndex', () => {
     expect(resolveQueuePlayIndex(q, -1, undefined)).toBe(-1);
     expect(resolveQueuePlayIndex(q, 1.5, undefined)).toBe(-1);
     expect(resolveQueuePlayIndex(q, '1', undefined)).toBe(-1);
+  });
+});
+
+describe('resolveQueueMove', () => {
+  const q = tracks(4);
+
+  it('moves the track the remote picked to the position it asked for', () => {
+    expect(resolveQueueMove(q, 1, 3, 't1')).toEqual({ from: 1, to: 3 });
+  });
+
+  it('refuses when the queue changed and another track is now at that position', () => {
+    expect(resolveQueueMove(q, 1, 3, 't2')).toBeNull();
+  });
+
+  it('refuses targets outside the queue, non-integer targets and no-op moves', () => {
+    expect(resolveQueueMove(q, 1, 4, 't1')).toBeNull();
+    expect(resolveQueueMove(q, 1, -1, 't1')).toBeNull();
+    expect(resolveQueueMove(q, 1, 1.5, 't1')).toBeNull();
+    expect(resolveQueueMove(q, 1, 1, 't1')).toBeNull();
   });
 });

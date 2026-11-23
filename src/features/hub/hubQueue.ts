@@ -58,3 +58,18 @@ export function resolveQueuePlayIndex(tracks: Pick<Track, 'id'>[], index: unknow
   if (typeof trackId === 'string' && tracks[index].id !== trackId) return -1;
   return index;
 }
+
+/**
+ * The move a remote asked for (track at `from` ends up at `to`), or null when the queue has changed
+ * since the remote saw it, the target is outside the queue, or nothing would move.
+ */
+export function resolveQueueMove(
+  tracks: Pick<Track, 'id'>[],
+  from: unknown,
+  to: unknown,
+  trackId: unknown,
+): { from: number; to: number } | null {
+  const src = resolveQueuePlayIndex(tracks, from, trackId);
+  if (src < 0 || typeof to !== 'number' || !Number.isInteger(to) || to < 0 || to >= tracks.length) return null;
+  return src === to ? null : { from: src, to };
+}

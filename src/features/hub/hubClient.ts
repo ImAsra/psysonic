@@ -41,7 +41,7 @@ import { buildCoverArtUrl } from '@/lib/api/subsonicStreamUrl';
 import { showToast } from '@/lib/dom/toast';
 import { currentServerKeys } from './hubServerKeys';
 import { deviceCompatible } from './compat';
-import { hubQueueWindow, resolveQueuePlayIndex } from './hubQueue';
+import { hubQueueWindow, resolveQueueMove, resolveQueuePlayIndex } from './hubQueue';
 import { hubArtwork, hubBrowse, hubPlayableTracks, type HubBrowseRequest } from './hubLibrary';
 
 /**
@@ -507,6 +507,13 @@ function playQueueIndex(args: Record<string, unknown> | null) {
   if (index >= 0) p.playTrack(tracks[index], undefined, undefined, undefined, index);
 }
 
+/** A remote dragged a track in this device's queue to another place (ignored when the queue changed meanwhile). */
+function moveQueueTrack(args: Record<string, unknown> | null) {
+  const tracks = getQueueTracksView(usePlayerStore.getState().queueItems);
+  const move = resolveQueueMove(tracks, args?.from, args?.to, args?.trackId);
+  if (move) localPlayer().reorderQueue(move.from, move.to);
+}
+
 /** A remote picked an album, playlist or song from the library: play it, play it next, or add it. */
 /** Bumped by every "play this" (replace) request: a lookup that finishes after a newer one is dropped. */
 let playItemGeneration = 0;
@@ -532,6 +539,7 @@ function applyCommand(action: string, args: Record<string, unknown> | null) {
   const p = localPlayer();
   switch (action) {
     case 'playIndex': return playQueueIndex(args);
+    case 'moveQueue': return moveQueueTrack(args);
     case 'playItem': return void playLibraryItem(args);
     case 'play': return p.resume();
     case 'pause': return p.pause();
