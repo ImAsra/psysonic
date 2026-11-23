@@ -1,7 +1,11 @@
 import { usePlayerStore } from '@/features/playback/store/playerStore';
 import { useAuthStore } from '@/store/authStore';
 import { hubDeviceKind } from './deviceKind';
-import { flushPlayQueuePosition, flushQueueSyncToServer } from '@/features/playback/store/queueSync';
+import {
+  flushPlayQueuePosition,
+  flushQueueSyncToServer,
+  setQueueServerWriteGate,
+} from '@/features/playback/store/queueSync';
 import { isPlayQueueSyncEnabled } from '@/features/playback/store/playQueueSyncSettingsStore';
 import { getPlayQueueForServer } from '@/lib/api/subsonicPlayQueue';
 import { songToTrack } from '@/lib/media/songToTrack';
@@ -79,6 +83,17 @@ let hubSender: ((msg: unknown) => void) | null = null;
  */
 const watching = () => !useHubStore.getState().joined;
 export const watcherId = (deviceId: string) => `${deviceId}-watch`;
+
+/** On its own, this device's queue stays its own: nothing it does may overwrite the shared server queue. */
+const queueWritesAllowed = () => {
+  const { enabled, joined } = useHubStore.getState();
+  return !enabled || joined;
+};
+
+/** Bumped whenever the hub is switched on or off or hub control changes; work started before it is stale. */
+let membership = 0;
+/** The shared queue being loaded after (re)joining; queue pushes wait for it. */
+let queueCatchUp: Promise<void> | null = null;
 
 /** Whether this device's own player is playing (for the Hub control switch). */
 export const isPlayingHere = () => usePlayerStore.getState().isPlaying;
@@ -256,11 +271,14 @@ function markQueueApplied() {
   lastAppliedQueue = usePlayerStore.getState().queueItems;
 }
 
-async function pushQueueAndSignal() {
+/** `asPlayer`: this device is (becoming) the player, so save its own track even if the hub still names another. */
+async function pushQueueAndSignal(asPlayer = false) {
   // On its own, this device's queue is its own business: saving it would overwrite the shared one.
   if (watching() || !isPlayQueueSyncEnabled() || useHubStore.getState().status !== 'connected') return;
+  await queueCatchUp; // never push a queue that has not caught up with the shared one yet
+  if (watching()) return;
   const p = usePlayerStore.getState();
-  const remote = getHubRemote();
+  const remote = asPlayer ? null : getHubRemote();
   // As a controller, save the ACTIVE device's track/position, not our idle local ones.
   const current = remote ? trackFromRemoteState(remote.state) : p.currentTrack;
   const seconds = remote ? remotePosition(remote.state, remote.stateAt) : clockNow();
@@ -277,8 +295,10 @@ async function refreshQueueFromServer() {
   const serverId = useAuthStore.getState().activeServerId;
   if (!serverId) return;
   const profileId = resolveServerIdForIndexKey(serverId) || serverId;
+  const startedIn = membership;
   try {
     const q = await getPlayQueueForServer(profileId);
+    if (startedIn !== membership) return; // hub control changed meanwhile: this answer is not for us now
     if (q.songs.length === 0) return;
     if (playQueueFingerprintsEqual(fingerprintFromServer(q), fingerprintFromLocalQueue())) return;
     const mapped = q.songs.map(song => ({ ...songToTrack(song), serverId: profileId }));
@@ -676,6 +696,19 @@ const syncRemoteRouting = () => {
     } catch { /* no cover is fine */ }
   };
 
+  // Joined (or reconnected): the shared queue and this device's queue must agree before anyone edits.
+  // Playing here, this device's queue is the one that counts; mirroring another, take the shared one.
+  const catchUpQueue = () => {
+    if (usePlayerStore.getState().isPlaying) {
+      void pushQueueAndSignal(true);
+    } else if (getHubRemote()) {
+      const loading = refreshQueueFromServer().finally(() => {
+        if (queueCatchUp === loading) queueCatchUp = null;
+      });
+      queueCatchUp = loading;
+    }
+  };
+
   const settingsSync = createSettingsSync({
     send,
     isConnected: () => useHubStore.getState().status === 'connected' && ws?.readyState === WebSocket.OPEN,
@@ -710,6 +743,7 @@ const syncRemoteRouting = () => {
         return;
       }
       void currentServerKeys().then(server => {
+        if (ws !== sock) return; // replaced meanwhile (hub control switched off, settings changed)
         lastServerKeys = JSON.stringify(server);
         send({ t: 'hello', v: PROTOCOL, token, deviceId, name: deviceName, kind: hubDeviceKind(), server });
       });
@@ -753,6 +787,7 @@ const syncRemoteRouting = () => {
           sendQueue();
           coverSentFor = ''; // nor a cover
           if (usePlayerStore.getState().isPlaying) void sendCover();
+          catchUpQueue();
           settingsSync.onWelcome(
             (m.settings ?? {}) as Record<string, Record<string, unknown>>,
             (m.syncConfig ?? {}) as Record<string, boolean>,
@@ -835,6 +870,8 @@ const syncRemoteRouting = () => {
    }
 
    if (s.enabled !== prev.enabled || s.joined !== prev.joined) {
+     membership++;
+     queueCatchUp = null;
      clearTimeout(settingsConnectTimer);
       settingsConnectTimer = undefined;
       gaveUp = false;
@@ -955,6 +992,8 @@ const syncRemoteRouting = () => {
     }, 300);
   });
 
+  const removeQueueGate = setQueueServerWriteGate(queueWritesAllowed);
+
   syncRemoteRouting();
 
   connect();
@@ -962,6 +1001,7 @@ const syncRemoteRouting = () => {
   return () => {
     stopped = true;
     hubSender = null;
+    removeQueueGate();
     uninstallRouting?.();
     uninstallRouting = null;
     unsubSettings();

@@ -50,6 +50,22 @@ const SYNC_DEBOUNCE_MS = 5000;
 const QUEUE_ID_LIMIT = 1000;
 
 const syncTimeoutByServer = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** A gate on top of the queue sync setting: while it says no, nothing is written to any server's play queue. */
+let serverWritesAllowed: () => boolean = () => true;
+
+/**
+ * Hold every play-queue write (debounced pushes, flushes, clears) while `allowed` returns false.
+ * Pulls are unaffected. Returns a function that removes the gate.
+ */
+export function setQueueServerWriteGate(allowed: () => boolean): () => void {
+  serverWritesAllowed = allowed;
+  return () => {
+    if (serverWritesAllowed === allowed) serverWritesAllowed = () => true;
+  };
+}
+
+const canWriteQueue = () => isPlayQueueSyncEnabled() && serverWritesAllowed();
 const lastQueueHeartbeatAtByServer = new Map<string, number>();
 
 usePlayQueueSyncSettingsStore.subscribe(state => {
@@ -95,7 +111,7 @@ function pushRefsForServer(
   currentTime: number,
   serverId: string,
 ): Promise<boolean> {
-  if (!isPlayQueueSyncEnabled()) return Promise.resolve(true);
+  if (!canWriteQueue()) return Promise.resolve(true);
   if (!serverId || refs.length === 0) return Promise.resolve(true);
   const ids = refs.slice(0, QUEUE_ID_LIMIT).map(r => r.trackId);
   const ownsCurrentTrack = currentTrack != null && playbackProfileIdForTrack(currentTrack) === serverId;
@@ -124,7 +140,7 @@ function scheduleQueueSyncToServer(
   currentTrack: Track | null,
   currentTime: number,
 ): void {
-  if (!isPlayQueueSyncEnabled()) return;
+  if (!canWriteQueue()) return;
   if (!isPlaybackServerReachable()) return;
   const serverId = getPlaybackServerId();
   cancelPendingQueueSync(serverId);
@@ -144,7 +160,7 @@ function scheduleQueueSyncByServer(
   currentTrack: Track | null,
   currentTime: number,
 ): void {
-  if (!isPlayQueueSyncEnabled()) return;
+  if (!canWriteQueue()) return;
   const previousByServer = queueRefsByServer(previousQueue);
   const nextByServer = queueRefsByServer(nextQueue);
   const serverIds = new Set([...previousByServer.keys(), ...nextByServer.keys()]);
@@ -168,11 +184,11 @@ function scheduleQueueSyncByServer(
 
 function scheduleQueueClearForServer(serverId: string): void {
   cancelPendingQueueSync(serverId);
-  if (!isPlayQueueSyncEnabled()) return;
+  if (!canWriteQueue()) return;
   if (!isQueueServerReachable(serverId)) return;
   const timeout = setTimeout(() => {
     syncTimeoutByServer.delete(serverId);
-    if (!isPlayQueueSyncEnabled()) return;
+    if (!canWriteQueue()) return;
     if (!isQueueServerReachable(serverId)) return;
     void savePlayQueue([], undefined, undefined, serverId).then(
       () => clearQueuePushFailed(serverId),
