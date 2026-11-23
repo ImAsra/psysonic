@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Track } from '@/lib/media/trackTypes';
+import { defaultHubDeviceName } from './deviceKind';
 
 export type HubStatus =
   | 'off'
@@ -96,7 +97,7 @@ export const useHubStore = create<HubStore>()(
       url: '',
       token: '',
       deviceId: newDeviceId(),
-      deviceName: 'Psysonic Desktop',
+      deviceName: defaultHubDeviceName(),
       syncPlaybackSettings: true,
       joined: true,
       setJoined: joined => set({ joined }),

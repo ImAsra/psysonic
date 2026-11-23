@@ -1,5 +1,6 @@
 import { usePlayerStore } from '@/features/playback/store/playerStore';
 import { useAuthStore } from '@/store/authStore';
+import { hubDeviceKind } from './deviceKind';
 import { flushPlayQueuePosition, flushQueueSyncToServer } from '@/features/playback/store/queueSync';
 import { isPlayQueueSyncEnabled } from '@/features/playback/store/playQueueSyncSettingsStore';
 import { getPlayQueueForServer } from '@/lib/api/subsonicPlayQueue';
@@ -710,7 +711,7 @@ const syncRemoteRouting = () => {
       }
       void currentServerKeys().then(server => {
         lastServerKeys = JSON.stringify(server);
-        send({ t: 'hello', v: PROTOCOL, token, deviceId, name: deviceName, kind: 'desktop', server });
+        send({ t: 'hello', v: PROTOCOL, token, deviceId, name: deviceName, kind: hubDeviceKind(), server });
       });
     };
 
