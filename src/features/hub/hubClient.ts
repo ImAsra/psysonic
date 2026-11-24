@@ -334,9 +334,20 @@ async function refreshQueueFromServer(): Promise<boolean> {
   try {
     const q = await getPlayQueueForServer(profileId);
     if (startedIn !== membership) return false; // hub control changed meanwhile: this answer is not for us now
-    if (q.songs.length > 0 && !playQueueFingerprintsEqual(fingerprintFromServer(q), fingerprintFromLocalQueue())) {
+    // Tracks and current track only: the playing device saves a new position with every push, and
+    // re-applying an unchanged queue for that would make a fresh queue array each time.
+    if (q.songs.length > 0
+        && !playQueueFingerprintsEqual(fingerprintFromServer(q), fingerprintFromLocalQueue(), Infinity)) {
       const mapped = q.songs.map(song => ({ ...songToTrack(song), serverId: profileId }));
-      applyMappedQueueProjection(mapped, q, profileId, false);
+      // The store notifies its subscribers inside setState, before markQueueApplied below runs:
+      // without forceLocal the queue taken from the server would count as a user edit and be
+      // saved and signalled again, and every device would answer every other one.
+      forceLocal = true;
+      try {
+        applyMappedQueueProjection(mapped, q, profileId, false);
+      } finally {
+        forceLocal = false;
+      }
       markQueueApplied();
     }
     queueBehind = false;
