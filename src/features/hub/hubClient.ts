@@ -17,6 +17,7 @@ import {
   fingerprintFromServer,
   playQueueFingerprintsEqual,
   applyServerPlayQueue,
+  setIdlePullGate,
 } from '@/features/playback/store/applyServerPlayQueue';
 import {
   clearQueueNaturallyEnded,
@@ -1318,6 +1319,13 @@ const syncRemoteRouting = () => {
   });
 
   const removeQueueGate = setQueueServerWriteGate(queueWritesAllowed);
+  // Under hub control the hub announces every queue change, and the player is the only one that
+  // saves. A background pull here would only reload the engine at an older position, and one that
+  // lands during a takeover replaces the engine mid-handoff (it once moved on to the next track).
+  const removeIdlePullGate = setIdlePullGate(() => {
+    const { enabled, joined, status } = useHubStore.getState();
+    return !(enabled && joined && status === 'connected');
+  });
 
   syncRemoteRouting();
 
@@ -1328,6 +1336,7 @@ const syncRemoteRouting = () => {
     hubSender = null;
     addCollector.clear();
     removeQueueGate();
+    removeIdlePullGate();
     clearTimeout(catchUpTimer);
     queueBehind = false;
     uninstallRouting?.();

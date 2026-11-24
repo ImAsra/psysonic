@@ -35,6 +35,7 @@ import { useAuthStore } from '@/store/authStore';
 import { resetAllStores } from '@/test/helpers/storeReset';
 import { onInvoke } from '@/test/mocks/tauri';
 import { startHubClient } from './hubClient';
+import { applyServerPlayQueue } from '@/features/playback/store/applyServerPlayQueue';
 import { useHubStore } from './hubStore';
 
 class FakeSocket {
@@ -132,6 +133,12 @@ describe('hub client: a remote sends its queue edits to the player', () => {
     expect(commands()).toEqual([expect.objectContaining({ action: 'moveQueue', args: { from: 2, to: 1, trackId: 'c' } })]);
     expect(savePlayQueueMock).not.toHaveBeenCalled();
     expect(signals()).toBe(0);
+  });
+
+  it('under hub control no background pull runs here (it would reload the engine mid-handoff)', async () => {
+    getPlayQueueMock.mockClear();
+    expect(await applyServerPlayQueue('srv', { mode: 'idle', preferServerPosition: true })).toBe('noop');
+    expect(getPlayQueueMock).not.toHaveBeenCalled();
   });
 
   it('when the player cleared its queue, the signal clears it here too', async () => {

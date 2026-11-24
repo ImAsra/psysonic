@@ -268,6 +268,20 @@ export function applyMappedQueueProjection(
   }
 }
 
+/** A gate on background (idle) pulls on top of the usual checks; while it says no, idle pulls do nothing. */
+let idlePullAllowed: () => boolean = () => true;
+
+/**
+ * Hold every idle pull while `allowed` returns false (checked before the fetch and again before the
+ * result is applied). Returns a function that removes the gate.
+ */
+export function setIdlePullGate(allowed: () => boolean): () => void {
+  idlePullAllowed = allowed;
+  return () => {
+    if (idlePullAllowed === allowed) idlePullAllowed = () => true;
+  };
+}
+
 export async function applyServerPlayQueue(
   serverId: string,
   options: {
@@ -292,7 +306,7 @@ export async function applyServerPlayQueue(
     return 'noop';
   }
 
-  if (options.mode === 'idle' && (isIdleQueuePullSuspended() || isQueuePushFailed(profileId))) {
+  if (options.mode === 'idle' && (!idlePullAllowed() || isIdleQueuePullSuspended() || isQueuePushFailed(profileId))) {
     return 'noop';
   }
   const idleGenerationAtStart = options.mode === 'idle' ? getIdlePullGeneration() : null;
@@ -317,7 +331,7 @@ export async function applyServerPlayQueue(
 
     const preferServerPosition = options.preferServerPosition ?? options.mode !== 'startup';
     if (options.mode === 'idle') {
-      if (isIdleQueuePullSuspended() || isQueuePushFailed(profileId)) return 'noop';
+      if (!idlePullAllowed() || isIdleQueuePullSuspended() || isQueuePushFailed(profileId)) return 'noop';
       if (idleGenerationAtStart !== getIdlePullGeneration()) return 'noop';
       const serverFp = fingerprintFromServer(q);
       const localFp = queueIsMultiServer()
