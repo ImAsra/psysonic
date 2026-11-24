@@ -23,15 +23,13 @@ import {
   clearQueuePushFailed,
   resumeIdleQueuePull,
 } from '@/features/playback/store/queuePlaybackIdle';
-import {
-  popQueueRedoSnapshot,
-  popQueueUndoSnapshot,
-  pushQueueRedoSnapshot,
-  pushQueueUndoSnapshot,
-  queueUndoSnapshotFromState,
-} from '@/features/playback/store/queueUndo';
 import { getQueueTracksView } from '@/features/playback/store/queueTrackView';
-import { subscribeQueueResolver } from '@/features/playback/store/queueTrackResolver';
+import {
+  getCachedTrack,
+  resolveBatch,
+  subscribeQueueResolver,
+} from '@/features/playback/store/queueTrackResolver';
+import { canonicalQueueServerKey } from '@/lib/server/serverIndexKey';
 import type { QueueItemRef, Track } from '@/lib/media/trackTypes';
 import { profileIdFromQueueRef } from '@/lib/media/trackServerScope';
 import { queueIsMultiServer } from '@/features/playback/utils/playback/playbackServer';
@@ -43,13 +41,23 @@ import {
 } from '@/features/playback/store/playbackProgress';
 import { useHubStore } from './hubStore';
 import type { HubDevice, HubRemoteState } from './hubStore';
-import { getHubRemote, remotePosition, trackFromRemoteState } from './useHubRemote';
+import { getHubRemote, remotePosition } from './useHubRemote';
 import { createSettingsSync } from './hubSettingsSync';
 import { buildCoverArtUrl } from '@/lib/api/subsonicStreamUrl';
 import { showToast } from '@/lib/dom/toast';
 import { currentServerKeys } from './hubServerKeys';
 import { deviceCompatible } from './compat';
 import { hubQueueWindow, resolveQueueMove, resolveQueuePlayIndex } from './hubQueue';
+import {
+  chunkIds,
+  chunkPositions,
+  createAddCollector,
+  pickQueueRefs,
+  positionsStillMatch,
+  readPositions,
+  type QueueAdd,
+  type QueueAddMode,
+} from './hubQueueEdits';
 import { hubArtwork, hubBrowse, hubPlayableTracks, type HubBrowseRequest } from './hubLibrary';
 
 /**
@@ -96,10 +104,28 @@ let membership = 0;
  */
 let queueBehind = false;
 
-/** Nothing may overwrite the shared server queue while this device plays on its own or is still catching up. */
+/** Another device is the player. The player owns the shared queue: only it saves it. */
+const anotherDevicePlays = () => {
+  const { devices, deviceId } = useHubStore.getState();
+  return devices.some(d => d.active && d.id !== deviceId && d.kind !== 'web');
+};
+
+/** A click-to-play here hands a new queue to the player: the hub holds the player back until it is saved. */
+let handingOver = false;
+
+/**
+ * Nothing may overwrite the shared server queue while this device plays on its own, is still catching
+ * up, or another device is the player (edits made here go to that player as commands instead).
+ */
 const queueWritesAllowed = () => {
   const { enabled, joined } = useHubStore.getState();
-  return !enabled || (joined && !queueBehind);
+  return !enabled || (joined && !queueBehind && (handingOver || !anotherDevicePlays()));
+};
+
+/** Queue edits made here are sent to the player instead of being applied and saved here. */
+const queueOwnedElsewhere = () => {
+  const { enabled, joined, status } = useHubStore.getState();
+  return enabled && joined && status === 'connected' && anotherDevicePlays();
 };
 
 /** Whether this device's own player is playing (for the Hub control switch). */
@@ -306,17 +332,13 @@ function markQueueApplied() {
   lastAppliedQueue = usePlayerStore.getState().queueItems;
 }
 
-/** `asPlayer`: this device is (becoming) the player, so save its own track even if the hub still names another. */
-async function pushQueueAndSignal(asPlayer = false) {
+/** Save this device's queue as the shared one and tell the others. Only the player (or, with none, anyone) may. */
+async function pushQueueAndSignal() {
   // On its own, this device's queue is its own business: saving it would overwrite the shared one.
-  if (watching() || queueBehind || !isPlayQueueSyncEnabled() || useHubStore.getState().status !== 'connected') return;
+  if (watching() || !queueWritesAllowed() || !isPlayQueueSyncEnabled() || useHubStore.getState().status !== 'connected') return;
   const p = usePlayerStore.getState();
-  const remote = asPlayer ? null : getHubRemote();
-  // As a controller, save the ACTIVE device's track/position, not our idle local ones.
-  const current = remote ? trackFromRemoteState(remote.state) : p.currentTrack;
-  const seconds = remote ? remotePosition(remote.state, remote.stateAt) : clockNow();
   try {
-    await flushQueueSyncToServer(p.queueItems, current, seconds);
+    await flushQueueSyncToServer(p.queueItems, p.currentTrack, clockNow());
     hubSender?.({ t: 'queue-changed' });
   } catch (e) {
     console.error('[psysonic-hub] queue push failed', e);
@@ -397,8 +419,11 @@ interface HubMsg {
   [key: string]: unknown;
 }
 const ACTIONS = ['togglePlay', 'resume', 'pause', 'next', 'previous', 'seek', 'setVolume', 'playTrack',
-  'toggleShuffleMode', 'toggleRepeat', 'undoLastQueueEdit', 'redoLastQueueEdit',
-  'shuffleQueue', 'shuffleUpcomingQueue'] as const;
+  'toggleShuffleMode', 'toggleRepeat'] as const;
+/** Queue edits: sent to the player whenever another device plays (see queueOwnedElsewhere). */
+const QUEUE_ACTIONS = ['enqueue', 'enqueueAt', 'playNext', 'enqueueRadio', 'removeTrack', 'removeQueueItems',
+  'moveQueueItems', 'reorderQueue', 'clearQueue', 'clearQueueExceptCurrent', 'pruneUpcomingToCurrent',
+  'shuffleQueue', 'shuffleUpcomingQueue', 'undoLastQueueEdit', 'redoLastQueueEdit'] as const;
 let originals: Record<string, Action> | null = null;
 
 /** The real local player (bypasses the remote-mode routing). */
@@ -445,7 +470,13 @@ async function remotePlayTrack(track: Track, queue?: Track[]) {
     queueBehind = false; // the queue picked here is meant to replace the shared one
     emitMine(0, track.duration ?? 0, 0);
 
-    const saved = await flushPlayQueuePosition();
+    handingOver = true;
+    let saved: boolean;
+    try {
+      saved = await flushPlayQueuePosition();
+    } finally {
+      handingOver = false;
+    }
     if (!saved) {
       reportTransferFailed('queue_save_failed');
       return;
@@ -465,33 +496,89 @@ async function remotePlayTrack(track: Track, queue?: Track[]) {
   }
 }
 
-/**
- * Ctrl+Z / Ctrl+Shift+Z while another device is the active player: restore the
- * QUEUE only. The app's normal undo can also restart the local audio engine on a
- * snapshot's old song, which must never happen on a device that is just a remote.
- */
-function remoteQueueHistory(dir: 'undo' | 'redo'): boolean {
-  const remote = getHubRemote();
-  if (!remote) return false;
-  const prior = usePlayerStore.getState();
-  const snap = dir === 'undo' ? popQueueUndoSnapshot() : popQueueRedoSnapshot();
-  if (!snap) return false;
-  const putBack = () => (dir === 'undo' ? pushQueueUndoSnapshot(snap) : pushQueueRedoSnapshot(snap));
+// ---------------------------------------------------------------------------
+// Queue edits on a remote. The player owns the shared queue and is the only one
+// that saves it, so an edit made here is sent to the player as a command. The
+// player applies it with its own queue actions, saves, and signals queue-changed;
+// this device then pulls the result like every other one. Moves and removals are
+// also shown here right away so a drag does not snap back while that happens.
+// ---------------------------------------------------------------------------
+const activeProfileId = () => {
+  const serverId = useAuthStore.getState().activeServerId;
+  return serverId ? resolveServerIdForIndexKey(serverId) || serverId : null;
+};
 
-  // The song the active device is playing has to stay in the queue, or it would jump.
-  const tid = remote.state.trackId;
-  let items = [...snap.queueItems];
-  let idx = tid ? items.findIndex(r => r.trackId === tid) : -1;
-  if (tid && idx < 0) {
-    const ref = prior.queueItems.find(r => r.trackId === tid);
-    if (!ref) { putBack(); return false; }
-    items = [ref, ...items];
-    idx = 0;
+let addBatch = 0;
+/** Send tracks to add to the player's queue. Tracks of another music server are left out (the player cannot find them). */
+function sendQueueAdd(mode: QueueAddMode, tracks: Track[], at = 0) {
+  const own = activeProfileId();
+  const ids = tracks
+    .filter(t => !t.serverId || (resolveServerIdForIndexKey(t.serverId) || t.serverId) === own)
+    .map(t => t.id);
+  if (!ids.length) return;
+  const batch = `${Date.now().toString(36)}-${++addBatch}`;
+  const parts = chunkIds(ids, { batch, part: 999, parts: 999, mode, at });
+  parts.forEach((part, k) => hubCommand('queueAdd', { batch, part: k, parts: parts.length, mode, at, ids: part }));
+}
+
+/** Queue positions with the track each one holds now, so the player can tell when its queue changed meanwhile. */
+function positionsOf(indices: readonly number[]) {
+  const items = usePlayerStore.getState().queueItems;
+  return indices.flatMap(i => (items[i] ? [{ i, id: items[i].trackId }] : []));
+}
+
+/** Owner side: queue edits from remotes are applied one after another, in the order they came in. */
+let queueEdits: Promise<unknown> = Promise.resolve();
+const inOrder = (edit: () => unknown) => {
+  queueEdits = queueEdits.then(edit).catch(e => console.error('[psysonic-hub] queue edit failed', e));
+};
+const addCollector = createAddCollector();
+
+/** Look up the tracks a remote asked to add, on this device's music server. Unknown ids are skipped. */
+async function tracksForIds(ids: string[]): Promise<Track[]> {
+  const serverId = useAuthStore.getState().activeServerId;
+  if (!serverId) return [];
+  const profileId = resolveServerIdForIndexKey(serverId) || serverId;
+  const refServer = canonicalQueueServerKey(serverId) || serverId;
+  const tracks: Track[] = [];
+  // The resolver cache holds a few hundred tracks: read each slice right after it resolves.
+  for (let i = 0; i < ids.length; i += 200) {
+    const refs = ids.slice(i, i + 200).map(trackId => ({ serverId: refServer, trackId }));
+    await resolveBatch(refs);
+    for (const ref of refs) {
+      const t = getCachedTrack(ref);
+      if (t) tracks.push({ ...t, serverId: profileId });
+    }
   }
-  const current = queueUndoSnapshotFromState(prior);
-  if (dir === 'undo') pushQueueRedoSnapshot(current); else pushQueueUndoSnapshot(current);
-  usePlayerStore.setState({ queueItems: items, queueIndex: Math.max(0, idx) });
-  return true; // the queue subscriber pushes it to the server and tells the other devices
+  return tracks;
+}
+
+async function applyQueueAdd(add: QueueAdd) {
+  const tracks = await tracksForIds(add.ids);
+  if (!tracks.length) return;
+  const p = localPlayer();
+  if (add.mode === 'next') p.playNext(tracks);
+  else if (add.mode === 'at') p.enqueueAt(tracks, add.at, true);
+  else p.enqueue(tracks, true);
+}
+
+function removeQueuePositions(args: Record<string, unknown> | null) {
+  const positions = readPositions(args);
+  if (!positions) return;
+  const refs = pickQueueRefs(usePlayerStore.getState().queueItems, positions);
+  if (refs.length) localPlayer().removeQueueItems(refs);
+}
+
+function moveQueuePositions(args: Record<string, unknown> | null) {
+  const gap = args?.gap;
+  if (!Number.isInteger(gap) || (gap as number) < 0) return;
+  const items = usePlayerStore.getState().queueItems;
+  const positions = readPositions(args);
+  // Large selections travel without track ids (they would not fit); positions alone are trusted then.
+  const indices = positions ? positions.i : Array.isArray(args?.i) ? args.i : null;
+  if (!indices || !indices.length || !indices.every(n => Number.isInteger(n) && n >= 0 && n < items.length)) return;
+  if (positions && !positionsStillMatch(items, positions)) return; // the queue changed meanwhile
+  localPlayer().moveQueueItems(indices as number[], gap as number);
 }
 
 // A slider drag fires dozens of events per second, but the hub cuts off connections that flood it.
@@ -514,8 +601,64 @@ function sendVolumeThrottled(vol: number) {
 function installRemoteRouting(): () => void {
   const st = usePlayerStore.getState() as unknown as Record<string, Action>;
   const saved: Record<string, Action> = {};
-  for (const name of ACTIONS) saved[name] = st[name];
+  for (const name of [...ACTIONS, ...QUEUE_ACTIONS]) saved[name] = st[name];
   originals = saved;
+
+  /** Show a move or removal here at once; the player's saved queue confirms or corrects it. */
+  const showHere = (name: string, args: unknown[]) => {
+    forceLocal = true;
+    try {
+      callAction(saved[name], args);
+    } finally {
+      forceLocal = false;
+    }
+    markQueueApplied();
+  };
+
+  const queueImpl: Record<string, Action> = {
+    enqueue: (tracks: Track[]) => sendQueueAdd('end', tracks),
+    enqueueRadio: (tracks: Track[]) => sendQueueAdd('end', tracks),
+    enqueueAt: (tracks: Track[], insertIndex: number) => sendQueueAdd('at', tracks, insertIndex),
+    playNext: (tracks: Track[]) => sendQueueAdd('next', tracks),
+    removeTrack: (index: number) => {
+      const positions = positionsOf([index]);
+      if (!positions.length) return;
+      for (const part of chunkPositions(positions)) hubCommand('removeQueue', { ...part });
+      showHere('removeTrack', [index]);
+    },
+    removeQueueItems: (refs: readonly QueueItemRef[]) => {
+      const items = usePlayerStore.getState().queueItems;
+      const positions = positionsOf(refs.map(r => {
+        const at = items.indexOf(r);
+        return at >= 0 ? at : items.findIndex(x => x.trackId === r.trackId);
+      }).filter(i => i >= 0));
+      if (!positions.length) return;
+      for (const part of chunkPositions(positions)) hubCommand('removeQueue', { ...part });
+      showHere('removeQueueItems', [refs]);
+    },
+    reorderQueue: (from: number, to: number) => {
+      const ref = usePlayerStore.getState().queueItems[from];
+      if (!ref) return;
+      hubCommand('moveQueue', { from, to, trackId: ref.trackId });
+      showHere('reorderQueue', [from, to]);
+    },
+    moveQueueItems: (indices: readonly number[], gapIndex: number) => {
+      const positions = positionsOf(indices);
+      if (!positions.length) return;
+      const [part, ...more] = chunkPositions(positions);
+      // One command must carry the whole move; without ids a large selection still fits.
+      hubCommand('moveQueueItems', more.length ? { i: positions.map(p => p.i), gap: gapIndex } : { ...part, gap: gapIndex });
+      showHere('moveQueueItems', [indices, gapIndex]);
+    },
+    clearQueue: () => hubCommand('clearQueue'),
+    clearQueueExceptCurrent: () => hubCommand('clearQueueExceptCurrent'),
+    pruneUpcomingToCurrent: () => hubCommand('pruneUpcoming'),
+    // One-shot shuffles and the edit history belong to the player's queue too.
+    shuffleQueue: () => hubCommand('shuffleQueue'),
+    shuffleUpcomingQueue: () => hubCommand('shuffleUpcomingQueue'),
+    undoLastQueueEdit: () => { hubCommand('undoQueue'); return true; },
+    redoLastQueueEdit: () => { hubCommand('redoQueue'); return true; },
+  };
 
   const remoteImpl: Record<string, Action> = {
     togglePlay: () => {
@@ -534,11 +677,6 @@ function installRemoteRouting(): () => void {
       hubCommand('seek', { positionSec: sec });
     },
     playTrack: (track: Track, queue?: Track[]) => { void remotePlayTrack(track, queue); },
-    // One-shot queue shuffles belong to whoever owns the queue: the device that is playing.
-    shuffleQueue: () => hubCommand('shuffleQueue'),
-    shuffleUpcomingQueue: () => hubCommand('shuffleUpcomingQueue'),
-    undoLastQueueEdit: () => remoteQueueHistory('undo'),
-    redoLastQueueEdit: () => remoteQueueHistory('redo'),
     toggleShuffleMode: () => {
       const next = !(getHubRemote()?.state.shuffle ?? false);
       patchRemote({ shuffle: next });
@@ -563,6 +701,10 @@ function installRemoteRouting(): () => void {
   for (const name of ACTIONS) {
     wrapped[name] = (...args: unknown[]) =>
       getHubRemote() && !forceLocal ? callAction(remoteImpl[name], args) : callAction(saved[name], args);
+  }
+  for (const name of QUEUE_ACTIONS) {
+    wrapped[name] = (...args: unknown[]) =>
+      queueOwnedElsewhere() && !forceLocal ? callAction(queueImpl[name], args) : callAction(saved[name], args);
   }
   usePlayerStore.setState(wrapped as never);
 
@@ -629,8 +771,20 @@ async function playLibraryItem(args: Record<string, unknown> | null) {
 function applyCommand(action: string, args: Record<string, unknown> | null) {
   const p = localPlayer();
   switch (action) {
-    case 'playIndex': return playQueueIndex(args);
-    case 'moveQueue': return moveQueueTrack(args);
+    case 'playIndex': return inOrder(() => playQueueIndex(args));
+    case 'moveQueue': return inOrder(() => moveQueueTrack(args));
+    case 'queueAdd': {
+      const add = addCollector.take(args); // parts are collected as they arrive
+      if (add) inOrder(() => applyQueueAdd(add));
+      return;
+    }
+    case 'removeQueue': return inOrder(() => removeQueuePositions(args));
+    case 'moveQueueItems': return inOrder(() => moveQueuePositions(args));
+    case 'clearQueue': return inOrder(() => p.clearQueue());
+    case 'clearQueueExceptCurrent': return inOrder(() => p.clearQueueExceptCurrent());
+    case 'pruneUpcoming': return inOrder(() => p.pruneUpcomingToCurrent());
+    case 'undoQueue': return inOrder(() => p.undoLastQueueEdit());
+    case 'redoQueue': return inOrder(() => p.redoLastQueueEdit());
     case 'playItem': return void playLibraryItem(args);
     case 'play': return p.resume();
     case 'pause': return p.pause();
@@ -654,8 +808,8 @@ function applyCommand(action: string, args: Record<string, unknown> | null) {
       if (Number.isFinite(v)) p.setVolume(Math.min(1, Math.max(0, v)));
       return;
     }
-    case 'shuffleQueue': return p.shuffleQueue();
-    case 'shuffleUpcomingQueue': return p.shuffleUpcomingQueue();
+    case 'shuffleQueue': return inOrder(() => p.shuffleQueue());
+    case 'shuffleUpcomingQueue': return inOrder(() => p.shuffleUpcomingQueue());
     case 'shuffle': {
       if (usePlayerStore.getState().shuffleMode !== (args?.value === true)) p.toggleShuffleMode();
       return;
@@ -767,7 +921,7 @@ const syncRemoteRouting = () => {
     const otherActive = hub.devices.some(d => d.active && d.id !== hub.deviceId && d.kind !== 'web');
     if (!otherActive || usePlayerStore.getState().isPlaying) {
       queueBehind = false;
-      if (usePlayerStore.getState().isPlaying) void pushQueueAndSignal(true);
+      if (usePlayerStore.getState().isPlaying) void pushQueueAndSignal();
       return;
     }
     queueBehind = true;
@@ -1041,10 +1195,16 @@ const syncRemoteRouting = () => {
   const unsubResolver = subscribeQueueResolver(scheduleQueue);
 
   let wasMirroring = !!getHubRemote();
+  // A device that started playing while another was the player could not save its queue until the
+  // hub named it the player. Save it once that happens (a takeover loads the queue instead).
+  let ownerElsewhere = anotherDevicePlays();
   const unsubRemote = useHubStore.subscribe(() => {
     const mirroring = !!getHubRemote();
     if (wasMirroring && !mirroring) scheduleQueue();
     wasMirroring = mirroring;
+    const elsewhere = anotherDevicePlays();
+    if (ownerElsewhere && !elsewhere && !forceLocal && usePlayerStore.getState().isPlaying) void pushQueueAndSignal();
+    ownerElsewhere = elsewhere;
   });
 
   // The user switched music server / account while connected: tell the hub.
@@ -1071,6 +1231,7 @@ const syncRemoteRouting = () => {
   return () => {
     stopped = true;
     hubSender = null;
+    addCollector.clear();
     removeQueueGate();
     clearTimeout(catchUpTimer);
     queueBehind = false;
