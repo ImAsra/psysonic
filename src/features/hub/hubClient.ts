@@ -31,6 +31,7 @@ import {
   subscribeQueueResolver,
 } from '@/features/playback/store/queueTrackResolver';
 import { canonicalQueueServerKey } from '@/lib/server/serverIndexKey';
+import { NAVIDROME_PUBLIC_SHARE_SERVER_ID } from '@/lib/share/navidromePublicSharePlayback';
 import type { QueueItemRef, Track } from '@/lib/media/trackTypes';
 import { profileIdFromQueueRef } from '@/lib/media/trackServerScope';
 import { queueIsMultiServer } from '@/features/playback/utils/playback/playbackServer';
@@ -294,6 +295,7 @@ async function handleTakeover(
       ? { trackId: hubState.trackId, seconds: hubSec + (hubState.playing ? Math.max(0, ageMs) / 1000 : 0) }
       : undefined;
     // Loaded paused while another device played (an idle pull does that), and with which track.
+    dropEntriesOfMissingServers();
     const engineLoaded = getIsAudioPaused();
     const loadedTrackId = usePlayerStore.getState().currentTrack?.id;
     const result = await pullQueueForTakeover(serverId, positionFor);
@@ -428,6 +430,25 @@ async function pushQueueAndSignal() {
  *   so clear here too. On a catch-up an empty shared queue only means nothing is shared yet.
  * @returns true when the local queue now matches the shared one (loaded, already equal, or none shared).
  */
+/**
+ * Drop queue entries of music servers that are not set up on this device (left over from a server
+ * that was removed). They cannot play here, are not part of the shared queue, and would otherwise
+ * stay in the queue next to it. Runs with forceLocal set by the caller, so it is not saved as an edit.
+ */
+function dropEntriesOfMissingServers() {
+  const { servers } = useAuthStore.getState();
+  if (!servers.length) return;
+  const known = new Set(servers.map(server => server.id));
+  const s = usePlayerStore.getState();
+  const keep = s.queueItems.filter(ref =>
+    ref.serverId === NAVIDROME_PUBLIC_SHARE_SERVER_ID || known.has(profileIdFromQueueRef(ref)));
+  if (keep.length === s.queueItems.length) return;
+  const current = s.queueItems[s.queueIndex];
+  const index = current ? keep.indexOf(current) : -1;
+  usePlayerStore.setState({ queueItems: keep, queueIndex: Math.max(0, index) });
+  markQueueApplied();
+}
+
 async function refreshQueueFromServer(emptyClears = false): Promise<boolean> {
   if (!isPlayQueueSyncEnabled()) return true; // nothing is shared, so nothing to catch up with
   if (forceLocal) return false;
@@ -438,6 +459,12 @@ async function refreshQueueFromServer(emptyClears = false): Promise<boolean> {
   try {
     const q = await getPlayQueueForServer(profileId);
     if (startedIn !== membership) return false; // hub control changed meanwhile: this answer is not for us now
+    forceLocal = true;
+    try {
+      dropEntriesOfMissingServers();
+    } finally {
+      forceLocal = false;
+    }
     // Tracks and current track only: the playing device saves a new position with every push, and
     // re-applying an unchanged queue for that would make a fresh queue array each time.
     if (q.songs.length > 0

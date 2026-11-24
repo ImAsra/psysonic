@@ -165,6 +165,20 @@ describe('hub takeover on a device whose queue still holds another server', () =
     expect(order).toEqual(['seek 40', 'resume']);
   });
 
+  it('drops entries of a music server that is not set up here, so the queue is the shared one', async () => {
+    useAuthStore.setState({
+      servers: [{ id: 'srv', name: 'Music', url: 'https://music.example.test', username: 'listener' }] as never,
+    });
+    latest().receive({
+      t: 'takeover', from: 'desk', fresh: false, ageMs: 0, server: [],
+      state: { from: 'desk', trackId: 'down', positionSec: 0, playing: true },
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(usePlayerStore.getState().queueItems.map(r => r.trackId)).toEqual(['down', 'later']);
+    expect(current().track).toBe('down');
+  });
+
   it('after a click-to-play handoff, plays the track the music server names', async () => {
     getPlayQueueMock.mockResolvedValue({ songs: [song('down'), song('picked')], current: 'picked', position: 0 });
     latest().receive({
