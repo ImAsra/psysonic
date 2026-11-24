@@ -25,7 +25,8 @@ export async function currentServerKeys(): Promise<string[]> {
   try {
     const server = useAuthStore.getState().getActiveServer();
     if (!server) return [];
-    const user = (server.username ?? '').trim();
+    // Subsonic servers match user names without regard to case, so "Name" and "name" are one account.
+    const user = (server.username ?? '').trim().toLowerCase();
     const urls = [server.url, server.alternateUrl].filter((u): u is string => !!u && !!u.trim());
     return await Promise.all(urls.map(u => sha256(`${normalizeUrl(u)}\n${user}`)));
   } catch {
