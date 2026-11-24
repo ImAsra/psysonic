@@ -33,6 +33,7 @@ import { usePlayerStore } from '@/features/playback/store/playerStore';
 import { usePlayQueueSyncSettingsStore } from '@/features/playback/store/playQueueSyncSettingsStore';
 import { useAuthStore } from '@/store/authStore';
 import { resetAllStores } from '@/test/helpers/storeReset';
+import { onInvoke } from '@/test/mocks/tauri';
 import { startHubClient } from './hubClient';
 import { useHubStore } from './hubStore';
 
@@ -133,6 +134,16 @@ describe('hub client: a remote sends its queue edits to the player', () => {
     expect(signals()).toBe(0);
   });
 
+  it('when the player cleared its queue, the signal clears it here too', async () => {
+    getPlayQueueMock.mockResolvedValue({ songs: [] });
+    latest().receive({ t: 'queue-changed' });
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(queueIds()).toEqual([]);
+    expect(savePlayQueueMock).not.toHaveBeenCalled();
+    expect(signals()).toBe(0);
+  });
+
   it('removing, clearing and undo go to the player as well', async () => {
     usePlayerStore.getState().removeTrack(1);
     usePlayerStore.getState().clearQueueExceptCurrent();
@@ -178,6 +189,16 @@ describe('hub client: the player applies queue edits from remotes and saves them
     expect(queueIds()).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
     expect(lastSaved()).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
     expect(signals()).toBeGreaterThan(0);
+  });
+
+  it('clearing from a remote saves the empty queue right away and signals', async () => {
+    onInvoke('audio_stop', () => undefined); // clearing stops the engine
+    latest().receive({ t: 'command', from: 'phone', action: 'clearQueue', args: null });
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(queueIds()).toEqual([]);
+    expect(lastSaved()).toEqual([]);
+    expect(signals()).toBe(1);
   });
 
   it('a removal finds its track even after the queue moved, and a stale move is dropped', async () => {

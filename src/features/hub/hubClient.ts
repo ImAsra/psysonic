@@ -7,7 +7,7 @@ import {
   setQueueServerWriteGate,
 } from '@/features/playback/store/queueSync';
 import { isPlayQueueSyncEnabled } from '@/features/playback/store/playQueueSyncSettingsStore';
-import { getPlayQueueForServer } from '@/lib/api/subsonicPlayQueue';
+import { getPlayQueueForServer, savePlayQueue } from '@/lib/api/subsonicPlayQueue';
 import { songToTrack } from '@/lib/media/songToTrack';
 import { resolveServerIdForIndexKey } from '@/lib/server/serverLookup';
 import {
@@ -338,15 +338,27 @@ async function pushQueueAndSignal() {
   if (watching() || !queueWritesAllowed() || !isPlayQueueSyncEnabled() || useHubStore.getState().status !== 'connected') return;
   const p = usePlayerStore.getState();
   try {
-    await flushQueueSyncToServer(p.queueItems, p.currentTrack, clockNow());
+    if (p.queueItems.length === 0) {
+      // A cleared queue: the flush below would skip an empty queue (and cancel the pending clear),
+      // so the others would pull the old one. Save it empty right away.
+      const profileId = activeProfileId();
+      if (!profileId) return;
+      await savePlayQueue([], undefined, undefined, profileId);
+    } else {
+      await flushQueueSyncToServer(p.queueItems, p.currentTrack, clockNow());
+    }
     hubSender?.({ t: 'queue-changed' });
   } catch (e) {
     console.error('[psysonic-hub] queue push failed', e);
   }
 }
 
-/** @returns true when the local queue now matches the shared one (loaded, already equal, or none shared). */
-async function refreshQueueFromServer(): Promise<boolean> {
+/**
+ * @param emptyClears the player signalled a change: an empty shared queue means it cleared its queue,
+ *   so clear here too. On a catch-up an empty shared queue only means nothing is shared yet.
+ * @returns true when the local queue now matches the shared one (loaded, already equal, or none shared).
+ */
+async function refreshQueueFromServer(emptyClears = false): Promise<boolean> {
   if (!isPlayQueueSyncEnabled()) return true; // nothing is shared, so nothing to catch up with
   if (forceLocal) return false;
   const serverId = useAuthStore.getState().activeServerId;
@@ -367,6 +379,14 @@ async function refreshQueueFromServer(): Promise<boolean> {
       forceLocal = true;
       try {
         applyMappedQueueProjection(mapped, q, profileId, false);
+      } finally {
+        forceLocal = false;
+      }
+      markQueueApplied();
+    } else if (q.songs.length === 0 && emptyClears && usePlayerStore.getState().queueItems.length > 0) {
+      forceLocal = true;
+      try {
+        usePlayerStore.setState({ queueItems: [], queueIndex: 0 });
       } finally {
         forceLocal = false;
       }
@@ -1034,7 +1054,7 @@ const syncRemoteRouting = () => {
           break;
         }
         case 'queue-changed':
-          void refreshQueueFromServer();
+          void refreshQueueFromServer(true);
           break;
         case 'settings':
           settingsSync.onSettings(String(m.category), (m.value ?? {}) as Record<string, unknown>);
