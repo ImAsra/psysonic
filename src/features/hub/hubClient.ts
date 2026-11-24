@@ -379,6 +379,9 @@ function markQueueApplied() {
   lastAppliedQueue = usePlayerStore.getState().queueItems;
 }
 
+/** The queue went from tracks to none through an edit here, and that is not saved yet. */
+let queueCleared = false;
+
 /** Save this device's queue as the shared one and tell the others. Only the player (or, with none, anyone) may. */
 async function pushQueueAndSignal() {
   // On its own, this device's queue is its own business: saving it would overwrite the shared one.
@@ -386,11 +389,15 @@ async function pushQueueAndSignal() {
   const p = usePlayerStore.getState();
   try {
     if (p.queueItems.length === 0) {
-      // A cleared queue: the flush below would skip an empty queue (and cancel the pending clear),
-      // so the others would pull the old one. Save it empty right away.
+      // Only a queue someone just cleared is saved empty. An empty queue that was never filled
+      // (a device that just started) must not wipe the shared one.
+      if (!queueCleared) return;
+      // The flush below would skip an empty queue (and cancel the pending clear), so the others
+      // would pull the old one. Save it empty right away.
       const profileId = activeProfileId();
       if (!profileId) return;
       await savePlayQueue([], undefined, undefined, profileId);
+      queueCleared = false;
     } else {
       await flushQueueSyncToServer(p.queueItems, p.currentTrack, clockNow());
     }
@@ -1232,6 +1239,7 @@ const syncRemoteRouting = () => {
 
     // A real queue edit (not one we applied from the server): push + signal the others.
     if (s.queueItems !== prev.queueItems && s.queueItems !== lastAppliedQueue && !forceLocal) {
+      queueCleared = s.queueItems.length === 0 && (prev.queueItems.length > 0 || queueCleared);
       clearTimeout(queueTimer);
       queueTimer = setTimeout(() => { void pushQueueAndSignal(); }, 400);
     }

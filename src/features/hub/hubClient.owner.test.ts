@@ -220,6 +220,18 @@ describe('hub client: the player applies queue edits from remotes and saves them
     expect(signals()).toBe(1);
   });
 
+  it('an empty queue that was never filled here does not wipe the shared one', async () => {
+    usePlayerStore.setState({ queueItems: [], queueIndex: 0, currentTrack: null });
+    await vi.advanceTimersByTimeAsync(2_000); // that was a clear and is saved; now the queue stays empty
+    savePlayQueueMock.mockClear();
+    latest().sent.length = 0;
+    usePlayerStore.setState({ queueItems: [] }); // a new (still empty) array, as a fresh start makes
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(savePlayQueueMock).not.toHaveBeenCalled();
+    expect(signals()).toBe(0);
+  });
+
   it('a removal finds its track even after the queue moved, and a stale move is dropped', async () => {
     latest().receive({ t: 'command', from: 'phone', action: 'removeQueue', args: { i: [0], id: ['c'] } });
     await vi.advanceTimersByTimeAsync(1_000);
