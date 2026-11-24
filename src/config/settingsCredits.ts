@@ -635,6 +635,7 @@ const CONTRIBUTOR_ENTRIES = [
     since: '1.56.0',
     contributions: [
       'AppImage launches against the system WebKitGTK when one is installed (PR #1348)',
+      'Playback — seeking behind reverse proxies that compress responses (PR #1881)',
     ],
   },
   {
@@ -663,6 +664,13 @@ const CONTRIBUTOR_ENTRIES = [
     since: '1.57.0',
     contributions: [
       'Album page — track ratings set in other apps (PR #1873)',
+    ],
+  },
+  {
+    github: 'carnation-sys',
+    since: '1.57.0',
+    contributions: [
+      'Mainstage banner — visibility tracking without scroll-time polling (PR #1871)',
     ],
   },
 ] as const;
