@@ -33,8 +33,7 @@ import { canonicalQueueServerKey } from '@/lib/server/serverIndexKey';
 import type { QueueItemRef, Track } from '@/lib/media/trackTypes';
 import { profileIdFromQueueRef } from '@/lib/media/trackServerScope';
 import { queueIsMultiServer } from '@/features/playback/utils/playback/playbackServer';
-import { preparePausedRestoreOnStartup } from '@/features/playback/store/pausedRestorePrepare';
-import { getIsAudioPaused } from '@/features/playback/store/engineState';
+import { getIsAudioPaused, setIsAudioPaused } from '@/features/playback/store/engineState';
 import { audioSeek } from '@/lib/api/audio';
 import {
   emitPlaybackProgress,
@@ -200,6 +199,9 @@ async function pullQueueForTakeover(serverId: string, positionFor?: { trackId: s
     preferServerPosition: true,
     pushUndo: false,
     positionFor,
+    // The takeover decides how the engine gets there (see handleTakeover): a second load started
+    // here would still be running when Play comes, and would start the track from the top.
+    prepareEngine: false,
   });
   if (result === 'applied' || result === 'noop') {
     resumeIdleQueuePull();
@@ -230,8 +232,8 @@ async function landOnHandedOverTrack(serverId: string, hubTrackId: string | null
     localPlayer().playTrack(track, undefined, undefined, undefined, index);
     return;
   }
+  // The engine is loaded by the takeover's resume (cold, at currentTime).
   usePlayerStore.setState({ queueIndex: index, currentTrack: track, currentTime: atSeconds });
-  preparePausedRestoreOnStartup(track, s.queueItems, index, atSeconds);
 }
 
 /** A handed-over track that starts more than this far before the hub's position is moved there. */
@@ -290,6 +292,9 @@ async function handleTakeover(
     const positionFor = !fresh && hubState?.trackId && typeof hubSec === 'number' && Number.isFinite(hubSec)
       ? { trackId: hubState.trackId, seconds: hubSec + (hubState.playing ? Math.max(0, ageMs) / 1000 : 0) }
       : undefined;
+    // Loaded paused while another device played (an idle pull does that), and with which track.
+    const engineLoaded = getIsAudioPaused();
+    const loadedTrackId = usePlayerStore.getState().currentTrack?.id;
     const result = await pullQueueForTakeover(serverId, positionFor);
     if (result !== 'applied' && result !== 'noop') return fail('queue_unavailable');
     queueBehind = false; // the shared queue is loaded here now
@@ -309,23 +314,20 @@ async function handleTakeover(
       const target = Math.max(0, Math.min(track.duration - 0.5, sec));
       handedOverAt = target;
       setClock(target, false);
-      if (Math.abs(target - usePlayerStore.getState().currentTime) > 0.75) {
-        // The pull already started loading the engine at the server's older position, and a seek
-        // sent while that load is still running gets lost. Load it again at the hub's position instead
-        // (this supersedes the first load); the resume below starts from there.
-        const s = usePlayerStore.getState();
-        preparePausedRestoreOnStartup(track, s.queueItems, s.queueIndex, target);
-      }
+      usePlayerStore.setState({ currentTime: target, progress: target / track.duration });
     }
-    // While another device played, this one may already have loaded the track paused, at the
-    // position saved back then. Play would continue there (warm resume), so move the loaded
-    // engine to the hand-over position first; a fully loaded engine takes the seek.
-    if (handedOverAt !== null && getIsAudioPaused()) {
+    // The pull did not touch the engine. If it already holds this track (loaded paused while
+    // another device played, at the position saved back then), move it to the hand-over position
+    // and resume it warm: a fully loaded engine takes the seek. Otherwise Play loads the track
+    // once, directly at currentTime (cold resume).
+    if (engineLoaded && track && loadedTrackId === track.id) {
       try {
-        await audioSeek({ seconds: handedOverAt });
+        await audioSeek({ seconds: usePlayerStore.getState().currentTime });
       } catch (e) {
         console.error('[psysonic-hub] seek before resume failed', e);
       }
+    } else {
+      setIsAudioPaused(false);
     }
 
     markQueueApplied();

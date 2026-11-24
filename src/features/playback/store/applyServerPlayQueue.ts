@@ -119,6 +119,8 @@ export function applyMappedQueue(
   serverProfileId: string,
   preferServerPosition: boolean,
   localTimeFallback: number,
+  /** false: only update the store; the caller loads the engine itself (a device handoff). */
+  prepareEngine = true,
 ): void {
   let currentTrack = mappedTracks[0];
   let queueIndex = 0;
@@ -170,7 +172,7 @@ export function applyMappedQueue(
     return;
   }
 
-  preparePausedRestoreOnStartup(currentTrack, queueItems, queueIndex, atSeconds);
+  if (prepareEngine) preparePausedRestoreOnStartup(currentTrack, queueItems, queueIndex, atSeconds);
 }
 
 export function mergeQueueServerProjection(
@@ -212,6 +214,7 @@ export function applyMappedQueueProjection(
   q: PlayQueueResult,
   serverProfileId: string,
   preserveLocalSurplus = true,
+  prepareEngine = true,
 ): void {
   seedQueueResolver(serverProfileId, mappedTracks);
   const remoteRefs = toQueueItemRefs(serverProfileId, mappedTracks);
@@ -260,7 +263,7 @@ export function applyMappedQueueProjection(
     currentTime: atSeconds,
   });
   void refreshWaveformForTrack(analysisTrackRef(currentTrack.id, serverProfileId));
-  if (!player.isPlaying) {
+  if (!player.isPlaying && prepareEngine) {
     preparePausedRestoreOnStartup(currentTrack, queueItems, queueIndex >= 0 ? queueIndex : 0, atSeconds);
   }
 }
@@ -276,6 +279,8 @@ export async function applyServerPlayQueue(
      * previous device stopped). Used when that track is the server queue's current one.
      */
     positionFor?: { trackId: string; seconds: number };
+    /** false: do not load the engine paused at the new position; the caller does (a device handoff). */
+    prepareEngine?: boolean;
   },
 ): Promise<ApplyPlayQueueResult> {
   if (!isPlayQueueSyncEnabled()) return 'noop';
@@ -331,9 +336,9 @@ export async function applyServerPlayQueue(
       // Keep the other owners' slots in place while refreshing this server's order.
       // Background pulls preserve local surplus; an explicit manual pull has an
       // undo snapshot and may intentionally accept the shorter remote queue.
-      applyMappedQueueProjection(mappedTracks, q, profileId, !options.pushUndo);
+      applyMappedQueueProjection(mappedTracks, q, profileId, !options.pushUndo, options.prepareEngine ?? true);
     } else {
-      applyMappedQueue(mappedTracks, q, profileId, preferServerPosition, localTime);
+      applyMappedQueue(mappedTracks, q, profileId, preferServerPosition, localTime, options.prepareEngine ?? true);
     }
     clearQueueHandoffPending();
     return 'applied';

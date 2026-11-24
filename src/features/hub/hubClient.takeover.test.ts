@@ -22,7 +22,7 @@ import { startHubClient } from './hubClient';
 import { useHubStore } from './hubStore';
 import { preparePausedRestoreOnStartup } from '@/features/playback/store/pausedRestorePrepare';
 import { emitPlaybackProgress } from '@/features/playback/store/playbackProgress';
-import { setIsAudioPaused } from '@/features/playback/store/engineState';
+import { getIsAudioPaused, setIsAudioPaused } from '@/features/playback/store/engineState';
 
 class FakeSocket {
   static OPEN = 1;
@@ -121,11 +121,12 @@ describe('hub takeover on a device whose queue still holds another server', () =
     });
     await vi.advanceTimersByTimeAsync(1_000);
 
-    // Already the pull loads it there, so playback never starts at the older position first.
-    const calls = vi.mocked(preparePausedRestoreOnStartup).mock.calls;
-    expect(calls.length).toBeGreaterThan(0);
-    for (const call of calls) expect(call[3]).toBe(40);
+    // The pull loads no engine of its own (that load would still run when Play comes); Play loads
+    // the track once, cold, at the hub's position.
+    expect(preparePausedRestoreOnStartup).not.toHaveBeenCalled();
     expect(resume).toHaveBeenCalled();
+    expect(usePlayerStore.getState().currentTime).toBe(40);
+    expect(getIsAudioPaused()).toBe(false);
   });
 
   it('moves to the hub position once audio runs, when the engine resumed at an older one', async () => {
@@ -151,7 +152,9 @@ describe('hub takeover on a device whose queue still holds another server', () =
     audioSeekMock.mockClear();
     audioSeekMock.mockImplementation(async (...a: unknown[]) => { order.push(`seek ${(a[0] as { seconds: number }).seconds}`); });
     resume.mockImplementation(() => { order.push('resume'); });
-    setIsAudioPaused(true); // loaded earlier, while the other device played, at an older position
+    // Loaded earlier with the same track, while the other device played, at an older position.
+    usePlayerStore.setState({ queueItems: [{ serverId: 'srv', trackId: 'down' }], queueIndex: 0, currentTrack: track('down', 'srv') });
+    setIsAudioPaused(true);
     latest().receive({
       t: 'takeover', from: 'desk', fresh: false, ageMs: 0, server: [],
       state: { from: 'desk', trackId: 'down', positionSec: 40, playing: false },
