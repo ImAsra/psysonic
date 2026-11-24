@@ -68,6 +68,10 @@ const queueIds = () => usePlayerStore.getState().queueItems.map(r => r.trackId);
 const savedQueues = () => savePlayQueueMock.mock.calls.map(call => call[0] as string[]);
 /** The queue this device kept on its own, or an edit of it, never reaches the server. */
 const savedOnlyShared = () => savedQueues().every(ids => !ids.includes('mine') && !ids.includes('extra'));
+/** Tracks this device asked the player to add, one list per add. */
+const addsSent = () => FakeSocket.all.flatMap(s => s.sent)
+  .filter(m => m.t === 'command' && m.action === 'queueAdd')
+  .map(m => (m.args as { ids: string[] }).ids);
 
 /** A pending answer to getPlayQueue that the test resolves when it wants. */
 function deferredQueue() {
@@ -148,17 +152,18 @@ describe('hub client and the shared queue', () => {
     usePlayerStore.getState().enqueue([track('extra')]);
     await vi.advanceTimersByTimeAsync(4_000);
     expect(savePlayQueueMock).not.toHaveBeenCalled();
-    expect(queueIds()).toEqual(['mine', 'extra']);
+    expect(queueIds()).toEqual(['mine']); // the edit went to the player instead
+    expect(addsSent()).toEqual([['extra']]);
 
     getPlayQueueMock.mockResolvedValueOnce({ songs: [song('shared1'), song('shared2')], current: 'shared1', position: 0 });
     await vi.advanceTimersByTimeAsync(2_000); // the retry
     expect(queueIds()).toEqual(['shared1', 'shared2']);
 
-    // Caught up: edits save as usual again.
+    // Caught up: edits still go to the player, which is the only one that saves.
     usePlayerStore.getState().enqueue([track('next')]);
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(savedQueues()[savedQueues().length - 1]).toEqual(['shared1', 'shared2', 'next']);
-    expect(savedOnlyShared()).toBe(true);
+    expect(savePlayQueueMock).not.toHaveBeenCalled();
+    expect(addsSent()).toEqual([['extra'], ['next']]);
   });
 
   it('joining right after a handoff, before the new player has reported, still takes the shared queue', async () => {

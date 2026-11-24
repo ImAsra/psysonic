@@ -9,6 +9,7 @@ import type { QueueItemRef, Track } from '@/lib/media/trackTypes';
 import { useAuthStore } from '@/store/authStore';
 import { usePlayerStore } from '@/features/playback/store/playerStore';
 import { preparePausedRestoreOnStartup } from '@/features/playback/store/pausedRestorePrepare';
+import { setIsAudioPaused } from '@/features/playback/store/engineState';
 import { isActivePublicShareQueue } from '@/lib/share/navidromePublicSharePlayback';
 import { pushQueueUndoFromGetter } from '@/features/playback/store/queueUndo';
 import { refreshWaveformForTrack } from '@/features/playback/store/waveformRefresh';
@@ -119,6 +120,8 @@ export function applyMappedQueue(
   serverProfileId: string,
   preferServerPosition: boolean,
   localTimeFallback: number,
+  /** false: only update the store; the caller loads the engine itself (a device handoff). */
+  prepareEngine = true,
 ): void {
   let currentTrack = mappedTracks[0];
   let queueIndex = 0;
@@ -170,7 +173,9 @@ export function applyMappedQueue(
     return;
   }
 
-  preparePausedRestoreOnStartup(currentTrack, queueItems, queueIndex, atSeconds);
+  if (prepareEngine) preparePausedRestoreOnStartup(currentTrack, queueItems, queueIndex, atSeconds);
+  // Not loaded here: a paused engine still holding the previous track must not be resumed warm.
+  else if (!sameCurrent) setIsAudioPaused(false);
 }
 
 export function mergeQueueServerProjection(
@@ -212,6 +217,7 @@ export function applyMappedQueueProjection(
   q: PlayQueueResult,
   serverProfileId: string,
   preserveLocalSurplus = true,
+  prepareEngine = true,
 ): void {
   seedQueueResolver(serverProfileId, mappedTracks);
   const remoteRefs = toQueueItemRefs(serverProfileId, mappedTracks);
@@ -260,9 +266,27 @@ export function applyMappedQueueProjection(
     currentTime: atSeconds,
   });
   void refreshWaveformForTrack(analysisTrackRef(currentTrack.id, serverProfileId));
-  if (!player.isPlaying) {
+  if (!player.isPlaying && !prepareEngine && !sameQueueTrack(player.currentTrack, currentTrack)) {
+    // Not loaded here: a paused engine still holding the previous track must not be resumed warm.
+    setIsAudioPaused(false);
+  }
+  if (!player.isPlaying && prepareEngine) {
     preparePausedRestoreOnStartup(currentTrack, queueItems, queueIndex >= 0 ? queueIndex : 0, atSeconds);
   }
+}
+
+/** Whether a background (idle) pull may load the engine paused at the pulled position. */
+let idlePullMayLoadEngine: () => boolean = () => true;
+
+/**
+ * While `allowed` returns false, idle pulls still update the queue but leave the engine alone
+ * (a device handoff loads it itself). Returns a function that removes the gate.
+ */
+export function setIdlePullEngineGate(allowed: () => boolean): () => void {
+  idlePullMayLoadEngine = allowed;
+  return () => {
+    if (idlePullMayLoadEngine === allowed) idlePullMayLoadEngine = () => true;
+  };
 }
 
 export async function applyServerPlayQueue(
@@ -271,6 +295,13 @@ export async function applyServerPlayQueue(
     mode: ApplyPlayQueueMode;
     preferServerPosition?: boolean;
     pushUndo?: boolean;
+    /**
+     * A fresher position for one track than the server has saved (a device handoff knows where the
+     * previous device stopped). Used when that track is the server queue's current one.
+     */
+    positionFor?: { trackId: string; seconds: number };
+    /** false: do not load the engine paused at the new position; the caller does (a device handoff). */
+    prepareEngine?: boolean;
   },
 ): Promise<ApplyPlayQueueResult> {
   if (!isPlayQueueSyncEnabled()) return 'noop';
@@ -288,7 +319,11 @@ export async function applyServerPlayQueue(
   const idleGenerationAtStart = options.mode === 'idle' ? getIdlePullGeneration() : null;
 
   try {
-    const q = await getPlayQueueForServer(profileId);
+    const fetched = await getPlayQueueForServer(profileId);
+    const fresher = options.positionFor;
+    const q = fresher && fetched.current === fresher.trackId
+      ? { ...fetched, position: Math.round(Math.max(0, fresher.seconds) * 1000) }
+      : fetched;
     // This request may have started before sync was disabled on this device.
     if (!isPlayQueueSyncEnabled()) return 'noop';
     if (q.songs.length === 0) return 'empty';
@@ -316,15 +351,16 @@ export async function applyServerPlayQueue(
       pushQueueUndoFromGetter(usePlayerStore.getState);
     }
 
+    const prepareEngine = options.prepareEngine ?? (options.mode === 'idle' ? idlePullMayLoadEngine() : true);
     const mappedTracks: Track[] = q.songs.map(song => ({ ...songToTrack(song), serverId: profileId }));
     const localTime = usePlayerStore.getState().currentTime;
     if (queueIsMultiServer()) {
       // Keep the other owners' slots in place while refreshing this server's order.
       // Background pulls preserve local surplus; an explicit manual pull has an
       // undo snapshot and may intentionally accept the shorter remote queue.
-      applyMappedQueueProjection(mappedTracks, q, profileId, !options.pushUndo);
+      applyMappedQueueProjection(mappedTracks, q, profileId, !options.pushUndo, prepareEngine);
     } else {
-      applyMappedQueue(mappedTracks, q, profileId, preferServerPosition, localTime);
+      applyMappedQueue(mappedTracks, q, profileId, preferServerPosition, localTime, prepareEngine);
     }
     clearQueueHandoffPending();
     return 'applied';
