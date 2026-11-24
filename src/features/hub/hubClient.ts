@@ -32,7 +32,10 @@ import {
 } from '@/features/playback/store/queueUndo';
 import { getQueueTracksView } from '@/features/playback/store/queueTrackView';
 import { subscribeQueueResolver } from '@/features/playback/store/queueTrackResolver';
-import type { Track } from '@/lib/media/trackTypes';
+import type { QueueItemRef, Track } from '@/lib/media/trackTypes';
+import { profileIdFromQueueRef } from '@/lib/media/trackServerScope';
+import { queueIsMultiServer } from '@/features/playback/utils/playback/playbackServer';
+import { preparePausedRestoreOnStartup } from '@/features/playback/store/pausedRestorePrepare';
 import {
   emitPlaybackProgress,
   subscribePlaybackProgress,
@@ -174,6 +177,32 @@ async function pullQueueForTakeover(serverId: string) {
   return result;
 }
 
+/**
+ * A queue that also holds another server's entries keeps its current entry through a pull, even
+ * when that entry is a leftover from that other server. On a takeover the handed-over track must
+ * play, so move to it: the track the hub reported, or (click-to-play handoff, where the hub's
+ * "now playing" is still the old one) the current track of the server queue. The position is set
+ * by the caller.
+ */
+async function landOnHandedOverTrack(serverId: string, hubTrackId: string | null) {
+  if (!queueIsMultiServer()) return; // a single-server pull already lands on the server's current track
+  const owner = resolveServerIdForIndexKey(serverId) || serverId;
+  const wanted = hubTrackId ?? (await getPlayQueueForServer(owner)).current ?? null;
+  if (!wanted) return;
+  const s = usePlayerStore.getState();
+  const isWanted = (ref: QueueItemRef | undefined) => profileIdFromQueueRef(ref) === owner && ref?.trackId === wanted;
+  if (isWanted(s.queueItems[s.queueIndex]) && s.currentTrack?.id === wanted) return;
+  const index = s.queueItems.findIndex(isWanted);
+  const track = index >= 0 ? getQueueTracksView(s.queueItems)[index] : undefined;
+  if (!track) return;
+  if (s.isPlaying) {
+    localPlayer().playTrack(track, undefined, undefined, undefined, index);
+    return;
+  }
+  usePlayerStore.setState({ queueIndex: index, currentTrack: track, currentTime: 0 });
+  preparePausedRestoreOnStartup(track, s.queueItems, index, 0);
+}
+
 async function handleTakeover(
   hubState: HubRemoteState | null,
   ageMs: number,
@@ -195,6 +224,7 @@ async function handleTakeover(
     const result = await pullQueueForTakeover(serverId);
     if (result !== 'applied' && result !== 'noop') return fail('queue_unavailable');
     queueBehind = false; // the shared queue is loaded here now
+    await landOnHandedOverTrack(serverId, fresh ? null : hubState?.trackId ?? null);
     const player = localPlayer();
     setClock(player.currentTime, false); // position the server queue gave us
     tickGuardUntil = Date.now() + 1500;
