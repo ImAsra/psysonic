@@ -190,13 +190,14 @@ let holdProgress = false;
  * Like pullPlayQueueFromServer but WITHOUT pushing a queue-undo entry: a device
  * switch is not a user queue edit, so Ctrl+Z must not roll it back.
  */
-async function pullQueueForTakeover(serverId: string) {
+async function pullQueueForTakeover(serverId: string, positionFor?: { trackId: string; seconds: number }) {
   if (!isPlayQueueSyncEnabled()) return 'noop' as const;
   clearQueueNaturallyEnded();
   const result = await applyServerPlayQueue(serverId, {
     mode: 'manual',
     preferServerPosition: true,
     pushUndo: false,
+    positionFor,
   });
   if (result === 'applied' || result === 'noop') {
     resumeIdleQueuePull();
@@ -212,7 +213,7 @@ async function pullQueueForTakeover(serverId: string) {
  * "now playing" is still the old one) the current track of the server queue. The position is set
  * by the caller.
  */
-async function landOnHandedOverTrack(serverId: string, hubTrackId: string | null) {
+async function landOnHandedOverTrack(serverId: string, hubTrackId: string | null, atSeconds = 0) {
   if (!queueIsMultiServer()) return; // a single-server pull already lands on the server's current track
   const owner = resolveServerIdForIndexKey(serverId) || serverId;
   const wanted = hubTrackId ?? (await getPlayQueueForServer(owner)).current ?? null;
@@ -227,8 +228,40 @@ async function landOnHandedOverTrack(serverId: string, hubTrackId: string | null
     localPlayer().playTrack(track, undefined, undefined, undefined, index);
     return;
   }
-  usePlayerStore.setState({ queueIndex: index, currentTrack: track, currentTime: 0 });
-  preparePausedRestoreOnStartup(track, s.queueItems, index, 0);
+  usePlayerStore.setState({ queueIndex: index, currentTrack: track, currentTime: atSeconds });
+  preparePausedRestoreOnStartup(track, s.queueItems, index, atSeconds);
+}
+
+/** A handed-over track that starts more than this far before the hub's position is moved there. */
+const CATCH_UP_SLACK_SEC = 2;
+const CATCH_UP_WINDOW_MS = 10_000;
+
+/**
+ * If the engine had already loaded the track at the server's older position, Play resumes from there.
+ * Once audio really runs (a seek then sticks), move it to where the previous device stopped.
+ */
+function catchUpOnceAudible(track: Track, atSeconds: number) {
+  let done = false;
+  const finish = () => {
+    done = true;
+    unsubProgress();
+    unsubSeek();
+    clearTimeout(timer);
+  };
+  // Watch the whole window: an early tick can still show the restored position before audio starts
+  // somewhere else. Any seek (the user's, or this one) ends the watch.
+  const unsubProgress = subscribePlaybackProgress(next => {
+    if (done || emittingMine) return;
+    const p = usePlayerStore.getState();
+    if (p.currentTrack?.id !== track.id) return finish();
+    if (!p.isPlaying || track.duration <= 0) return;
+    if (next.currentTime < atSeconds - CATCH_UP_SLACK_SEC) {
+      finish();
+      localPlayer().seek(Math.min(track.duration - 0.5, atSeconds) / track.duration);
+    }
+  });
+  const unsubSeek = subscribePlaybackSeek(() => { if (!done) finish(); });
+  const timer = setTimeout(finish, CATCH_UP_WINDOW_MS);
 }
 
 async function handleTakeover(
@@ -249,10 +282,16 @@ async function handleTakeover(
   }
   forceLocal = true;
   try {
-    const result = await pullQueueForTakeover(serverId);
+    // The server only has the position the previous device last saved; the hub knows where it stopped.
+    // Load the engine there right away, so playback does not start at the older position first.
+    const hubSec = hubState?.positionSec;
+    const positionFor = !fresh && hubState?.trackId && typeof hubSec === 'number' && Number.isFinite(hubSec)
+      ? { trackId: hubState.trackId, seconds: hubSec + (hubState.playing ? Math.max(0, ageMs) / 1000 : 0) }
+      : undefined;
+    const result = await pullQueueForTakeover(serverId, positionFor);
     if (result !== 'applied' && result !== 'noop') return fail('queue_unavailable');
     queueBehind = false; // the shared queue is loaded here now
-    await landOnHandedOverTrack(serverId, fresh ? null : hubState?.trackId ?? null);
+    await landOnHandedOverTrack(serverId, fresh ? null : hubState?.trackId ?? null, positionFor?.seconds ?? 0);
     const player = localPlayer();
     setClock(player.currentTime, false); // position the server queue gave us
     tickGuardUntil = Date.now() + 1500;
@@ -261,18 +300,24 @@ async function handleTakeover(
     // The hub has the exact position it reported when it yielded, so prefer that
     // when it is the same track (avoids the time jumping back on switch).
     const track = player.currentTrack;
+    let handedOverAt: number | null = null;
     if (!fresh && hubState?.trackId && track && track.id === hubState.trackId
         && Number.isFinite(hubState.positionSec) && track.duration > 0) {
       const sec = (hubState.positionSec ?? 0) + (hubState.playing ? Math.max(0, ageMs) / 1000 : 0);
       const target = Math.max(0, Math.min(track.duration - 0.5, sec));
+      handedOverAt = target;
       setClock(target, false);
-      if (Math.abs(target - player.currentTime) > 0.75) {
-        player.seek(target / track.duration);
-        await new Promise(r => setTimeout(r, 200)); // let the seek settle before resuming
+      if (Math.abs(target - usePlayerStore.getState().currentTime) > 0.75) {
+        // The pull already started loading the engine at the server's older position, and a seek
+        // sent while that load is still running gets lost. Load it again at the hub's position instead
+        // (this supersedes the first load); the resume below starts from there.
+        const s = usePlayerStore.getState();
+        preparePausedRestoreOnStartup(track, s.queueItems, s.queueIndex, target);
       }
     }
     markQueueApplied();
     emitMine(clockNow(), localPlayer().currentTrack?.duration ?? 0, 0);
+    if (track && handedOverAt !== null) catchUpOnceAudible(track, handedOverAt);
     localPlayer().resume();
   } catch (e) {
     console.error('[psysonic-hub] takeover failed', e);

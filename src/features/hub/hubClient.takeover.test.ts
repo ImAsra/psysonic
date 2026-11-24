@@ -18,6 +18,8 @@ import { useAuthStore } from '@/store/authStore';
 import { resetAllStores } from '@/test/helpers/storeReset';
 import { startHubClient } from './hubClient';
 import { useHubStore } from './hubStore';
+import { preparePausedRestoreOnStartup } from '@/features/playback/store/pausedRestorePrepare';
+import { emitPlaybackProgress } from '@/features/playback/store/playbackProgress';
 
 class FakeSocket {
   static OPEN = 1;
@@ -60,12 +62,14 @@ const current = () => {
 describe('hub takeover on a device whose queue still holds another server', () => {
   let stop: () => void;
   const resume = vi.fn();
+  const seek = vi.fn();
 
   beforeEach(async () => {
     vi.useFakeTimers();
     resetAllStores();
     FakeSocket.all = [];
     resume.mockClear();
+    seek.mockClear();
     getPlayQueueMock.mockReset();
     getPlayQueueMock.mockResolvedValue({ songs: [song('down'), song('later')], current: 'down', position: 0 });
     vi.stubGlobal('WebSocket', FakeSocket);
@@ -78,7 +82,7 @@ describe('hub takeover on a device whose queue still holds another server', () =
       currentTrack: track('old', 'gone'),
       isPlaying: false,
       resume,
-      seek: vi.fn(),
+      seek,
     });
     useHubStore.setState({ enabled: true, url: 'http://hub.local:5533', token: 'tok', deviceId: 'phone-me', joined: true });
     stop = startHubClient();
@@ -103,6 +107,40 @@ describe('hub takeover on a device whose queue still holds another server', () =
     expect(current().track).toBe('down');
     expect(current().slot).toMatchObject({ serverId: 'srv', trackId: 'down' });
     expect(resume).toHaveBeenCalled();
+  });
+
+  it('loads the engine at the position the hub reported, not the older saved one', async () => {
+    vi.mocked(preparePausedRestoreOnStartup).mockClear();
+    // The music server has the position last saved (0:00); the hub knows the player was at 0:40.
+    latest().receive({
+      t: 'takeover', from: 'desk', fresh: false, ageMs: 0, server: [],
+      state: { from: 'desk', trackId: 'down', positionSec: 40, playing: false },
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    // Already the pull loads it there, so playback never starts at the older position first.
+    const calls = vi.mocked(preparePausedRestoreOnStartup).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) expect(call[3]).toBe(40);
+    expect(resume).toHaveBeenCalled();
+  });
+
+  it('moves to the hub position once audio runs, when the engine resumed at an older one', async () => {
+    resume.mockImplementation(() => usePlayerStore.setState({ isPlaying: true }));
+    latest().receive({
+      t: 'takeover', from: 'desk', fresh: false, ageMs: 0, server: [],
+      state: { from: 'desk', trackId: 'down', positionSec: 40, playing: false },
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(seek).not.toHaveBeenCalled();
+
+    // The engine had the track loaded at the saved position: audio starts at 0:12.
+    emitPlaybackProgress({ currentTime: 12, progress: 0.12, buffered: 1 });
+    expect(seek).toHaveBeenCalledWith(0.4);
+
+    seek.mockClear();
+    emitPlaybackProgress({ currentTime: 12.5, progress: 0.125, buffered: 1 });
+    expect(seek).not.toHaveBeenCalled(); // once only
   });
 
   it('after a click-to-play handoff, plays the track the music server names', async () => {

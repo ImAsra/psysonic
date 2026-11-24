@@ -271,6 +271,11 @@ export async function applyServerPlayQueue(
     mode: ApplyPlayQueueMode;
     preferServerPosition?: boolean;
     pushUndo?: boolean;
+    /**
+     * A fresher position for one track than the server has saved (a device handoff knows where the
+     * previous device stopped). Used when that track is the server queue's current one.
+     */
+    positionFor?: { trackId: string; seconds: number };
   },
 ): Promise<ApplyPlayQueueResult> {
   if (!isPlayQueueSyncEnabled()) return 'noop';
@@ -288,7 +293,11 @@ export async function applyServerPlayQueue(
   const idleGenerationAtStart = options.mode === 'idle' ? getIdlePullGeneration() : null;
 
   try {
-    const q = await getPlayQueueForServer(profileId);
+    const fetched = await getPlayQueueForServer(profileId);
+    const fresher = options.positionFor;
+    const q = fresher && fetched.current === fresher.trackId
+      ? { ...fetched, position: Math.round(Math.max(0, fresher.seconds) * 1000) }
+      : fetched;
     // This request may have started before sync was disabled on this device.
     if (!isPlayQueueSyncEnabled()) return 'noop';
     if (q.songs.length === 0) return 'empty';
