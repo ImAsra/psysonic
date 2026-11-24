@@ -106,4 +106,13 @@ export const player = {
   hubTransferQueueUnavailable: "L'autre appareil n'a pas pu charger la file d'attente.",
   hubTransferDeviceCannotPlay: 'Cet appareil ne peut pas lire de fichiers audio.',
   hubTransferFailed: "Le transfert n'a pas abouti.",
+  hubControl: 'Contrôle par le hub',
+  hubControlOnHint: 'Les autres appareils peuvent voir celui-ci, y lire et le contrôler.',
+  hubControlOffHint: 'Lecture indépendante. Les autres appareils ne peuvent ni le mettre en pause ni le contrôler.',
+  hubOnItsOwn: 'Lecture indépendante',
+  hubAlsoPlaying: '{{name}} joue aussi.',
+  hubJoin: 'Rejoindre',
+  hubJoinHint: 'Arrêter ici et contrôler {{name}}',
+  hubPlayHere: 'Lire ici',
+  hubPlayHereHint: '{{name}} se met en pause',
 };

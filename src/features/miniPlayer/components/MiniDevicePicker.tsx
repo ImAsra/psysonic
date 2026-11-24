@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom';
 import { emit } from '@tauri-apps/api/event';
+import { useTranslation } from 'react-i18next';
 import { Check, Globe, Monitor, MonitorSpeaker, Smartphone } from 'lucide-react';
 import { useMiniAnchoredPopover } from '@/features/miniPlayer/hooks/useMiniAnchoredPopover';
 import { deviceCompatible } from '@/features/hub';
@@ -13,6 +14,7 @@ const KIND_ICON = { desktop: Monitor, phone: Smartphone, web: Globe } as const;
  * payload and a pick is sent back as `mini:hub-transfer`.
  */
 export function MiniDevicePicker({ hub }: { hub: MiniHubInfo }) {
+  const { t } = useTranslation();
   const players = hub.devices.filter(d => d.kind !== 'web');
   const { open, setOpen, popStyle, btnRef, popRef } = useMiniAnchoredPopover(200, 44 + players.length * 34);
   const active = players.find(d => d.active);
@@ -27,8 +29,8 @@ export function MiniDevicePicker({ hub }: { hub: MiniHubInfo }) {
         className={`mini-player__tool${open || elsewhere ? ' mini-player__tool--active' : ''}`}
         onClick={() => setOpen(v => !v)}
         data-tauri-drag-region="false"
-        data-tooltip={elsewhere ? `Playing on ${active!.name}` : 'Play on a device'}
-        aria-label="Play on a device"
+        data-tooltip={elsewhere ? t('player.hubPlayingOn', { name: active!.name }) : t('player.hubPlayOnDevice')}
+        aria-label={t('player.hubPlayOnDevice')}
       >
         <MonitorSpeaker size={13} />
       </button>
@@ -39,7 +41,7 @@ export function MiniDevicePicker({ hub }: { hub: MiniHubInfo }) {
           style={popStyle}
           data-tauri-drag-region="false"
         >
-          <div className="hub-device-title">Play on</div>
+          <div className="hub-device-title">{t('player.hubPlayOn')}</div>
           {players.map(d => {
             const Icon = KIND_ICON[d.kind as keyof typeof KIND_ICON] ?? Monitor;
             const blocked = !d.active && !deviceCompatible(source, d, hub.serverCheck);
@@ -50,7 +52,7 @@ export function MiniDevicePicker({ hub }: { hub: MiniHubInfo }) {
                 className={`hub-device-row${d.active ? ' hub-device-row--active' : ''}`}
                 data-tauri-drag-region="false"
                 disabled={blocked}
-                title={blocked ? 'Uses a different music server or account' : undefined}
+                title={blocked ? t('player.hubDifferentServer') : undefined}
                 onClick={() => {
                   if (!d.active) emit('mini:hub-transfer', { to: d.id }).catch(() => {});
                   setOpen(false);
@@ -58,7 +60,7 @@ export function MiniDevicePicker({ hub }: { hub: MiniHubInfo }) {
               >
                 <Icon size={14} />
                 <span className="hub-device-row__name">
-                  {d.name}{d.id === hub.myId ? ' (this device)' : ''}
+                  {d.name}{d.id === hub.myId ? ` (${t('settings.hubThisDevice')})` : ''}
                 </span>
                 {d.active && <Check size={12} />}
               </button>

@@ -106,4 +106,13 @@ export const player = {
   hubTransferQueueUnavailable: 'Другото устройство не успя да зареди опашката.',
   hubTransferDeviceCannotPlay: 'Това устройство не може да възпроизвежда аудио.',
   hubTransferFailed: 'Прехвърлянето не бе успешно.',
+  hubControl: 'Управление от хъба',
+  hubControlOnHint: 'Другите устройства могат да виждат, да пускат на и да управляват това.',
+  hubControlOffHint: 'Свири самостоятелно. Другите устройства не могат да го паузират или управляват.',
+  hubOnItsOwn: 'Свири самостоятелно',
+  hubAlsoPlaying: '{{name}} също свири.',
+  hubJoin: 'Присъедини се',
+  hubJoinHint: 'Спри тук и управлявай {{name}}',
+  hubPlayHere: 'Пусни тук',
+  hubPlayHereHint: '{{name}} спира на пауза',
 };

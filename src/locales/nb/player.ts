@@ -106,4 +106,13 @@ export const player = {
   hubTransferQueueUnavailable: 'Den andre enheten kunne ikke laste inn køen.',
   hubTransferDeviceCannotPlay: 'Denne enheten kan ikke spille av lyd.',
   hubTransferFailed: 'Overføringen ble ikke gjennomført.',
+  hubControl: 'Hub-styring',
+  hubControlOnHint: 'Andre enheter kan se, spille av på og styre denne.',
+  hubControlOffHint: 'Spiller på egen hånd. Andre enheter kan ikke sette den på pause eller styre den.',
+  hubOnItsOwn: 'Spiller på egen hånd',
+  hubAlsoPlaying: '{{name}} spiller også.',
+  hubJoin: 'Bli med',
+  hubJoinHint: 'Stopp her og styr {{name}}',
+  hubPlayHere: 'Spill her',
+  hubPlayHereHint: '{{name}} settes på pause',
 };

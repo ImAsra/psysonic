@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Track } from '@/lib/media/trackTypes';
+import { defaultHubDeviceName } from './deviceKind';
 
 export type HubStatus =
   | 'off'
@@ -64,6 +65,12 @@ interface HubStore {
   setUrl: (v: string) => void;
   setToken: (v: string) => void;
   setDeviceName: (v: string) => void;
+  /**
+   * Under hub control (the default). Off, this device plays on its own: it watches the hub to show
+   * what the others play, but they can't see, pause or control it, and it never becomes a remote.
+   */
+  joined: boolean;
+  setJoined: (v: boolean) => void;
   /** Keep crossfade / AutoDJ / gapless etc. identical on all devices. */
   syncPlaybackSettings: boolean;
   setSyncPlaybackSettings: (v: boolean) => void;
@@ -90,8 +97,10 @@ export const useHubStore = create<HubStore>()(
       url: '',
       token: '',
       deviceId: newDeviceId(),
-      deviceName: 'Psysonic Desktop',
+      deviceName: defaultHubDeviceName(),
       syncPlaybackSettings: true,
+      joined: true,
+      setJoined: joined => set({ joined }),
       setEnabled: enabled => set({ enabled }),
       setUrl: url => set({ url }),
       setToken: token => set({ token }),
@@ -119,6 +128,7 @@ export const useHubStore = create<HubStore>()(
         deviceId: s.deviceId,
         deviceName: s.deviceName,
         syncPlaybackSettings: s.syncPlaybackSettings,
+        joined: s.joined,
       }),
     },
   ),

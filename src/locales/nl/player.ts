@@ -106,4 +106,13 @@ export const player = {
   hubTransferQueueUnavailable: 'Het andere apparaat kon de wachtrij niet laden.',
   hubTransferDeviceCannotPlay: 'Dat apparaat kan geen audio afspelen.',
   hubTransferFailed: 'De overdracht is niet gelukt.',
+  hubControl: 'Hubbediening',
+  hubControlOnHint: 'Andere apparaten kunnen dit apparaat zien, erop afspelen en het bedienen.',
+  hubControlOffHint: 'Speelt zelfstandig. Andere apparaten kunnen het niet pauzeren of bedienen.',
+  hubOnItsOwn: 'Speelt zelfstandig',
+  hubAlsoPlaying: '{{name}} speelt ook.',
+  hubJoin: 'Meedoen',
+  hubJoinHint: 'Hier stoppen en {{name}} bedienen',
+  hubPlayHere: 'Hier afspelen',
+  hubPlayHereHint: '{{name}} pauzeert',
 };

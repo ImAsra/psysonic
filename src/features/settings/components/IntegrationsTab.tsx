@@ -6,6 +6,7 @@ import {
   DEFAULT_DISCORD_TEMPLATE_STATE,
 } from '@/store/authStoreDefaults';
 import { useThemeStore } from '@/store/themeStore';
+import { HubSettings } from '@/features/hub';
 import SettingsSubSection from '@/features/settings/components/SettingsSubSection';
 import { SettingsGroup } from '@/features/settings/components/SettingsGroup';
 import { SettingsToggle } from '@/features/settings/components/SettingsToggle';
@@ -22,7 +23,6 @@ import { MusicNetworkSection } from '@/features/settings/components/musicNetwork
 import { purgeExternalAlbumArt, purgeExternalArtworkAllServers } from '@/lib/api/coverCache';
 import { useShareSettingsStore } from '@/features/share';
 import { usePlayQueueSyncSettingsStore } from '@/features/playback';
-import { HubSettings } from '@/features/hub';
 
 export function IntegrationsTab() {
   const { t } = useTranslation();

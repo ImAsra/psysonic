@@ -53,6 +53,7 @@ import {
   getLastQueueHeartbeatAt,
   hasPendingQueueSync,
   pushQueueOnPlaybackStart,
+  setQueueServerWriteGate,
   syncQueueToServer,
   syncAutomaticQueueMutationToServers,
   syncUserQueueClearToServers,
@@ -385,5 +386,58 @@ describe('finalizePlayQueueAtTrackEnd', () => {
     expect(savePlayQueueMock).toHaveBeenCalledWith(['a', 'b'], 'b', 245000, 'srv-a');
     expect(isQueueNaturallyEnded()).toBe(true);
     expect(hasPendingQueueSync()).toBe(false);
+  });
+});
+
+describe('setQueueServerWriteGate', () => {
+  const queue = [ref('a'), ref('b')];
+  let writesAllowed = true;
+  let removeGate: () => void;
+
+  beforeEach(() => {
+    writesAllowed = true;
+    removeGate = setQueueServerWriteGate(() => writesAllowed);
+  });
+  afterEach(() => removeGate());
+
+  it('while closed, no playback push, user edit, clear or flush reaches the server', async () => {
+    writesAllowed = false;
+    syncQueueToServer(queue, track('a'), 30);
+    syncUserQueueMutationToServer([], queue, track('a'), 30);
+    syncAutomaticQueueMutationToServers([], queue, track('a'), 30);
+    syncUserQueueClearToServers(queue);
+    await flushQueueSyncToServer(queue, track('a'), 30);
+    playerState.queueItems = queue;
+    playerState.currentTrack = track('a');
+    await flushPlayQueuePosition();
+    await flushPlayQueueForServer('srv-a');
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(savePlayQueueMock).not.toHaveBeenCalled();
+  });
+
+  it('a push scheduled while open is dropped if the gate closes before it fires', async () => {
+    syncUserQueueMutationToServer([], queue, track('a'), 30);
+    writesAllowed = false;
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(savePlayQueueMock).not.toHaveBeenCalled();
+  });
+
+  it('an edit made while closed is not pushed later when the gate opens again', async () => {
+    writesAllowed = false;
+    syncUserQueueMutationToServer([], queue, track('a'), 30);
+    writesAllowed = true;
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(savePlayQueueMock).not.toHaveBeenCalled();
+  });
+
+  it('saves as usual once removed', async () => {
+    writesAllowed = false;
+    removeGate();
+    await flushQueueSyncToServer(queue, track('a'), 30);
+
+    expect(savePlayQueueMock).toHaveBeenCalledWith(['a', 'b'], 'a', 30000, 'srv-a');
   });
 });

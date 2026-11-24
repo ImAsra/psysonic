@@ -106,4 +106,13 @@ export const player = {
   hubTransferQueueUnavailable: 'A másik eszköz nem tudta betölteni a várólistát.',
   hubTransferDeviceCannotPlay: 'Ez az eszköz nem tud hangot lejátszani.',
   hubTransferFailed: 'Az átvitel nem sikerült.',
+  hubControl: 'Hub-vezérlés',
+  hubControlOnHint: 'A többi eszköz láthatja, játszhat rajta és vezérelheti ezt az eszközt.',
+  hubControlOffHint: 'Önállóan játszik. A többi eszköz nem tudja szüneteltetni vagy vezérelni.',
+  hubOnItsOwn: 'Önállóan játszik',
+  hubAlsoPlaying: '{{name}} is épp játszik.',
+  hubJoin: 'Csatlakozás',
+  hubJoinHint: 'Megállás itt és {{name}} vezérlése',
+  hubPlayHere: 'Lejátszás itt',
+  hubPlayHereHint: '{{name}} szünetel',
 };
