@@ -144,6 +144,25 @@ describe('hub client: a remote sends its queue edits to the player', () => {
     expect(signals()).toBe(0);
   });
 
+  it('becoming the player through a takeover saves nothing before the handed-over queue is loaded', async () => {
+    let answer!: (v: unknown) => void;
+    getPlayQueueMock.mockReturnValueOnce(new Promise(r => { answer = r; }));
+    usePlayerStore.setState({ isPlaying: true, resume: vi.fn(), seek: vi.fn() });
+    latest().receive({
+      t: 'takeover', from: 'living', fresh: false, ageMs: 0, server: [],
+      state: { from: 'living', trackId: 'x', positionSec: 30, playing: true },
+    });
+    // The hub names this device the player right after the takeover message.
+    latest().receive({ t: 'devices', devices: [{ ...living, active: false }, { ...me, active: true }] });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(savePlayQueueMock).not.toHaveBeenCalled();
+
+    answer({ songs: ['x', 'y'].map(song), current: 'x', position: 30_000 });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(queueIds()).toEqual(['x', 'y']);
+    for (const call of savePlayQueueMock.mock.calls) expect(call[0]).toEqual(['x', 'y']);
+  });
+
   it('removing, clearing and undo go to the player as well', async () => {
     usePlayerStore.getState().removeTrack(1);
     usePlayerStore.getState().clearQueueExceptCurrent();

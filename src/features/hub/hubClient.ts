@@ -181,6 +181,8 @@ async function handleYield(to: string, send: (m: unknown) => void) {
 
 /** While true, player actions are never routed to the remote (we are applying things locally). */
 let forceLocal = false;
+/** A takeover is being handled: this device loads the handed-over queue and must not save its own meanwhile. */
+let takingOver = 0;
 /** While true, the remote position is not pushed into the shared progress clock. */
 let holdProgress = false;
 
@@ -335,7 +337,7 @@ function markQueueApplied() {
 /** Save this device's queue as the shared one and tell the others. Only the player (or, with none, anyone) may. */
 async function pushQueueAndSignal() {
   // On its own, this device's queue is its own business: saving it would overwrite the shared one.
-  if (watching() || !queueWritesAllowed() || !isPlayQueueSyncEnabled() || useHubStore.getState().status !== 'connected') return;
+  if (watching() || takingOver || !queueWritesAllowed() || !isPlayQueueSyncEnabled() || useHubStore.getState().status !== 'connected') return;
   const p = usePlayerStore.getState();
   try {
     if (p.queueItems.length === 0) {
@@ -1069,13 +1071,16 @@ const syncRemoteRouting = () => {
           void handleYield(String(m.to), send);
           break;
         case 'takeover':
+          // Set before anything is awaited: the hub names this device the player right after this
+          // message, and that must not save the queue this device had before it loads the handed-over one.
+          takingOver++;
           void handleTakeover(
             m.state ?? null,
             Number(m.ageMs) || 0,
             m.fresh === true,
             Array.isArray(m.server) ? m.server.filter((k): k is string => typeof k === 'string') : [],
             send,
-          );
+          ).finally(() => { takingOver--; });
           break;
         case 'transfer-failed':
           reportTransferFailed(String(m.reason));
@@ -1223,7 +1228,9 @@ const syncRemoteRouting = () => {
     if (wasMirroring && !mirroring) scheduleQueue();
     wasMirroring = mirroring;
     const elsewhere = anotherDevicePlays();
-    if (ownerElsewhere && !elsewhere && !forceLocal && usePlayerStore.getState().isPlaying) void pushQueueAndSignal();
+    if (ownerElsewhere && !elsewhere && !forceLocal && !takingOver && usePlayerStore.getState().isPlaying) {
+      void pushQueueAndSignal();
+    }
     ownerElsewhere = elsewhere;
   });
 
