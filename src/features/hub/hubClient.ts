@@ -34,6 +34,8 @@ import type { QueueItemRef, Track } from '@/lib/media/trackTypes';
 import { profileIdFromQueueRef } from '@/lib/media/trackServerScope';
 import { queueIsMultiServer } from '@/features/playback/utils/playback/playbackServer';
 import { preparePausedRestoreOnStartup } from '@/features/playback/store/pausedRestorePrepare';
+import { getIsAudioPaused } from '@/features/playback/store/engineState';
+import { audioSeek } from '@/lib/api/audio';
 import {
   emitPlaybackProgress,
   subscribePlaybackProgress,
@@ -315,6 +317,17 @@ async function handleTakeover(
         preparePausedRestoreOnStartup(track, s.queueItems, s.queueIndex, target);
       }
     }
+    // While another device played, this one may already have loaded the track paused, at the
+    // position saved back then. Play would continue there (warm resume), so move the loaded
+    // engine to the hand-over position first; a fully loaded engine takes the seek.
+    if (handedOverAt !== null && getIsAudioPaused()) {
+      try {
+        await audioSeek({ seconds: handedOverAt });
+      } catch (e) {
+        console.error('[psysonic-hub] seek before resume failed', e);
+      }
+    }
+
     markQueueApplied();
     emitMine(clockNow(), localPlayer().currentTrack?.duration ?? 0, 0);
     if (track && handedOverAt !== null) catchUpOnceAudible(track, handedOverAt);

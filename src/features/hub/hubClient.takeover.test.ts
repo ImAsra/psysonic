@@ -11,6 +11,8 @@ vi.mock('@/lib/api/subsonicPlayQueue', () => ({
 // Loading the paused engine after a queue change is outside these assertions.
 vi.mock('@/features/playback/store/pausedRestorePrepare', () => ({ preparePausedRestoreOnStartup: vi.fn() }));
 vi.mock('@/lib/network/subsonicNetworkGuard', () => ({ isSubsonicServerReachable: () => true }));
+const { audioSeekMock } = vi.hoisted(() => ({ audioSeekMock: vi.fn(async (..._a: unknown[]) => undefined) }));
+vi.mock('@/lib/api/audio', async importOriginal => ({ ...(await importOriginal<object>()), audioSeek: audioSeekMock }));
 
 import { usePlayerStore } from '@/features/playback/store/playerStore';
 import { usePlayQueueSyncSettingsStore } from '@/features/playback/store/playQueueSyncSettingsStore';
@@ -20,6 +22,7 @@ import { startHubClient } from './hubClient';
 import { useHubStore } from './hubStore';
 import { preparePausedRestoreOnStartup } from '@/features/playback/store/pausedRestorePrepare';
 import { emitPlaybackProgress } from '@/features/playback/store/playbackProgress';
+import { setIsAudioPaused } from '@/features/playback/store/engineState';
 
 class FakeSocket {
   static OPEN = 1;
@@ -141,6 +144,22 @@ describe('hub takeover on a device whose queue still holds another server', () =
     seek.mockClear();
     emitPlaybackProgress({ currentTime: 12.5, progress: 0.125, buffered: 1 });
     expect(seek).not.toHaveBeenCalled(); // once only
+  });
+
+  it('moves an engine that was already loaded paused to the hand-over position before playing', async () => {
+    const order: string[] = [];
+    audioSeekMock.mockClear();
+    audioSeekMock.mockImplementation(async (...a: unknown[]) => { order.push(`seek ${(a[0] as { seconds: number }).seconds}`); });
+    resume.mockImplementation(() => { order.push('resume'); });
+    setIsAudioPaused(true); // loaded earlier, while the other device played, at an older position
+    latest().receive({
+      t: 'takeover', from: 'desk', fresh: false, ageMs: 0, server: [],
+      state: { from: 'desk', trackId: 'down', positionSec: 40, playing: false },
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    setIsAudioPaused(false);
+
+    expect(order).toEqual(['seek 40', 'resume']);
   });
 
   it('after a click-to-play handoff, plays the track the music server names', async () => {
