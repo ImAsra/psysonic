@@ -85,6 +85,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Song Info shows the channel count reported by your server. During original-file playback, supported FLAC, extensible WAV and Vorbis files can show a verified speaker grouping such as **5.1** instead.
 * A channel count alone is never treated as a speaker layout, and a transcoded stream cannot relabel the original file.
 
+### Remove albums and playlists from Continue listening
+
+**By [@Psychotoxical](https://github.com/Psychotoxical), suggested by Ethmaker on Discord, PR [#1883](https://github.com/Psysonic/psysonic/pull/1883)**
+
+* Hover a card in **Continue listening** on Mainstage and click the **X** to remove that album or playlist. **Clear** in the header of the row empties it at once.
+* Removed something by mistake? The notice that follows has an **Undo** button.
+
+### Scrobbling and Private mode in one menu
+
+**By [@Psychotoxical](https://github.com/Psychotoxical), PR [#1884](https://github.com/Psysonic/psysonic/pull/1884)**
+
+* The scrobble button in the player bar opens one menu for everything about scrobbling: your Last.fm (or other) account with its status, the **Private mode** switch, how much of the song you have heard with a mark where it gets scrobbled, and **Force scrobble**. Clicking the account opens **Settings → Integrations**.
+* The top bar is lighter: the Private mode mask and the account indicator have moved into that menu. While Private mode is on, the scrobble button shows the mask; a red dot on it means the account needs to sign in again.
+* The scrobble button is always there now, and the **Manual force scrobble** setting is gone. Nothing is sent unless you click Force scrobble.
+
 ## Fixed
 
 ### Smart playlists keep Navidrome 0.64 rules when edited
@@ -241,6 +256,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Restoring a queue saved by another client no longer overwrites the previous album or playlist's Continue Listening point with tracks from the new queue. Position-only updates keep the current list's session.
 * Existing corrupted points are not repaired automatically.
 
+### Mainstage banner does less work while you scroll
+
+**By [@carnation-sys](https://github.com/carnation-sys), PR [#1871](https://github.com/Psysonic/psysonic/pull/1871)**
+
+* The featured album banner on Mainstage measured its position on every scroll step and kept checking every 220 ms while it was out of view. The browser now tells it when the banner is visible: albums keep changing while you can see it, pause when you scroll away, and continue when you scroll back.
+
 ### Album pages show track ratings set in other apps
 
 **By [@kris-anderson](https://github.com/kris-anderson), PR [#1873](https://github.com/Psysonic/psysonic/pull/1873)**
@@ -254,6 +275,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * Last.fm, Libre.fm, Rocksky, custom GNU FM servers and Maloja's Audioscrobbler API received the full artist line of a song with several artists, such as "Artist A feat. Artist B", and counted every combination as an artist of its own. Scrobbles, Now Playing, loves and track stats now go to the first artist only. ListenBrainz, Koito and Maloja's native and ListenBrainz APIs still receive the full line.
 * Songs you loved earlier under such a combined name show as not loved in Psysonic, and the old scrobbles stay with the combined name.
+
+### Seeking works behind a reverse proxy that compresses responses
+
+**By [@netherguy4](https://github.com/netherguy4), PR [#1881](https://github.com/Psysonic/psysonic/pull/1881)**
+
+* Seeking in a song did nothing when your server sits behind a reverse proxy that compresses every response, such as Traefik with a global compression rule. Psysonic now asks for audio uncompressed, so the proxy leaves songs alone and seeking works again. Song previews and radio streams are requested the same way.
 
 ## Changed
 
