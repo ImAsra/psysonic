@@ -147,3 +147,29 @@ export function createAddCollector() {
     },
   };
 }
+
+/** Sorted positions as runs `[start, count]`: a selection of hundreds of tracks fits one command. */
+export function toRuns(indices: readonly number[]): [number, number][] {
+  const sorted = [...new Set(indices)].sort((a, b) => a - b);
+  const runs: [number, number][] = [];
+  for (const i of sorted) {
+    const last = runs[runs.length - 1];
+    if (last && last[0] + last[1] === i) last[1]++;
+    else runs.push([i, 1]);
+  }
+  return runs;
+}
+
+/** Positions from runs `[start, count]`; null when malformed or implausibly large. */
+export function fromRuns(raw: unknown, max = 100_000): number[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: number[] = [];
+  for (const run of raw) {
+    if (!Array.isArray(run) || run.length !== 2) return null;
+    const [start, count] = run;
+    if (!Number.isInteger(start) || !Number.isInteger(count) || start < 0 || count < 1) return null;
+    if (out.length + count > max) return null;
+    for (let k = 0; k < count; k++) out.push(start + k);
+  }
+  return out;
+}

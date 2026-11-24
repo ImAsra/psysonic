@@ -9,6 +9,7 @@ import type { QueueItemRef, Track } from '@/lib/media/trackTypes';
 import { useAuthStore } from '@/store/authStore';
 import { usePlayerStore } from '@/features/playback/store/playerStore';
 import { preparePausedRestoreOnStartup } from '@/features/playback/store/pausedRestorePrepare';
+import { setIsAudioPaused } from '@/features/playback/store/engineState';
 import { isActivePublicShareQueue } from '@/lib/share/navidromePublicSharePlayback';
 import { pushQueueUndoFromGetter } from '@/features/playback/store/queueUndo';
 import { refreshWaveformForTrack } from '@/features/playback/store/waveformRefresh';
@@ -173,6 +174,8 @@ export function applyMappedQueue(
   }
 
   if (prepareEngine) preparePausedRestoreOnStartup(currentTrack, queueItems, queueIndex, atSeconds);
+  // Not loaded here: a paused engine still holding the previous track must not be resumed warm.
+  else if (!sameCurrent) setIsAudioPaused(false);
 }
 
 export function mergeQueueServerProjection(
@@ -263,22 +266,26 @@ export function applyMappedQueueProjection(
     currentTime: atSeconds,
   });
   void refreshWaveformForTrack(analysisTrackRef(currentTrack.id, serverProfileId));
+  if (!player.isPlaying && !prepareEngine && !sameQueueTrack(player.currentTrack, currentTrack)) {
+    // Not loaded here: a paused engine still holding the previous track must not be resumed warm.
+    setIsAudioPaused(false);
+  }
   if (!player.isPlaying && prepareEngine) {
     preparePausedRestoreOnStartup(currentTrack, queueItems, queueIndex >= 0 ? queueIndex : 0, atSeconds);
   }
 }
 
-/** A gate on background (idle) pulls on top of the usual checks; while it says no, idle pulls do nothing. */
-let idlePullAllowed: () => boolean = () => true;
+/** Whether a background (idle) pull may load the engine paused at the pulled position. */
+let idlePullMayLoadEngine: () => boolean = () => true;
 
 /**
- * Hold every idle pull while `allowed` returns false (checked before the fetch and again before the
- * result is applied). Returns a function that removes the gate.
+ * While `allowed` returns false, idle pulls still update the queue but leave the engine alone
+ * (a device handoff loads it itself). Returns a function that removes the gate.
  */
-export function setIdlePullGate(allowed: () => boolean): () => void {
-  idlePullAllowed = allowed;
+export function setIdlePullEngineGate(allowed: () => boolean): () => void {
+  idlePullMayLoadEngine = allowed;
   return () => {
-    if (idlePullAllowed === allowed) idlePullAllowed = () => true;
+    if (idlePullMayLoadEngine === allowed) idlePullMayLoadEngine = () => true;
   };
 }
 
@@ -306,7 +313,7 @@ export async function applyServerPlayQueue(
     return 'noop';
   }
 
-  if (options.mode === 'idle' && (!idlePullAllowed() || isIdleQueuePullSuspended() || isQueuePushFailed(profileId))) {
+  if (options.mode === 'idle' && (isIdleQueuePullSuspended() || isQueuePushFailed(profileId))) {
     return 'noop';
   }
   const idleGenerationAtStart = options.mode === 'idle' ? getIdlePullGeneration() : null;
@@ -331,7 +338,7 @@ export async function applyServerPlayQueue(
 
     const preferServerPosition = options.preferServerPosition ?? options.mode !== 'startup';
     if (options.mode === 'idle') {
-      if (!idlePullAllowed() || isIdleQueuePullSuspended() || isQueuePushFailed(profileId)) return 'noop';
+      if (isIdleQueuePullSuspended() || isQueuePushFailed(profileId)) return 'noop';
       if (idleGenerationAtStart !== getIdlePullGeneration()) return 'noop';
       const serverFp = fingerprintFromServer(q);
       const localFp = queueIsMultiServer()
@@ -344,15 +351,16 @@ export async function applyServerPlayQueue(
       pushQueueUndoFromGetter(usePlayerStore.getState);
     }
 
+    const prepareEngine = options.prepareEngine ?? (options.mode === 'idle' ? idlePullMayLoadEngine() : true);
     const mappedTracks: Track[] = q.songs.map(song => ({ ...songToTrack(song), serverId: profileId }));
     const localTime = usePlayerStore.getState().currentTime;
     if (queueIsMultiServer()) {
       // Keep the other owners' slots in place while refreshing this server's order.
       // Background pulls preserve local surplus; an explicit manual pull has an
       // undo snapshot and may intentionally accept the shorter remote queue.
-      applyMappedQueueProjection(mappedTracks, q, profileId, !options.pushUndo, options.prepareEngine ?? true);
+      applyMappedQueueProjection(mappedTracks, q, profileId, !options.pushUndo, prepareEngine);
     } else {
-      applyMappedQueue(mappedTracks, q, profileId, preferServerPosition, localTime, options.prepareEngine ?? true);
+      applyMappedQueue(mappedTracks, q, profileId, preferServerPosition, localTime, prepareEngine);
     }
     clearQueueHandoffPending();
     return 'applied';

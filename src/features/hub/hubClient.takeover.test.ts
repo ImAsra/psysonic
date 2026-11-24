@@ -165,6 +165,25 @@ describe('hub takeover on a device whose queue still holds another server', () =
     expect(order).toEqual(['seek 40', 'resume']);
   });
 
+  it('keeps entries without a server key when dropping those of missing servers', async () => {
+    useAuthStore.setState({
+      servers: [{ id: 'srv', name: 'Music', url: 'https://music.example.test', username: 'listener' }] as never,
+    });
+    usePlayerStore.setState({
+      queueItems: [{ serverId: 'gone', trackId: 'old' }, { serverId: '', trackId: 'keyless' }, { serverId: 'srv', trackId: 'down' }],
+      queueIndex: 2,
+      currentTrack: track('down', 'srv'),
+    });
+    getPlayQueueMock.mockReturnValueOnce(new Promise(() => {})); // look at the queue before the pull lands
+    latest().receive({
+      t: 'takeover', from: 'desk', fresh: false, ageMs: 0, server: [],
+      state: { from: 'desk', trackId: 'down', positionSec: 0, playing: true },
+    });
+    await flush();
+
+    expect(usePlayerStore.getState().queueItems.map(r => r.trackId)).toEqual(['keyless', 'down']);
+  });
+
   it('drops entries of a music server that is not set up here, so the queue is the shared one', async () => {
     useAuthStore.setState({
       servers: [{ id: 'srv', name: 'Music', url: 'https://music.example.test', username: 'listener' }] as never,

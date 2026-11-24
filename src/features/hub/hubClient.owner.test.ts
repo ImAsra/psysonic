@@ -34,6 +34,9 @@ import { usePlayQueueSyncSettingsStore } from '@/features/playback/store/playQue
 import { useAuthStore } from '@/store/authStore';
 import { resetAllStores } from '@/test/helpers/storeReset';
 import { onInvoke } from '@/test/mocks/tauri';
+import { clearAllQueuePushFailures, resumeIdleQueuePull } from '@/features/playback/store/queuePlaybackIdle';
+import { getIsAudioPaused, setIsAudioPaused } from '@/features/playback/store/engineState';
+import { preparePausedRestoreOnStartup } from '@/features/playback/store/pausedRestorePrepare';
 import { startHubClient } from './hubClient';
 import { applyServerPlayQueue } from '@/features/playback/store/applyServerPlayQueue';
 import { useHubStore } from './hubStore';
@@ -135,10 +138,18 @@ describe('hub client: a remote sends its queue edits to the player', () => {
     expect(signals()).toBe(0);
   });
 
-  it('under hub control no background pull runs here (it would reload the engine mid-handoff)', async () => {
-    getPlayQueueMock.mockClear();
-    expect(await applyServerPlayQueue('srv', { mode: 'idle', preferServerPosition: true })).toBe('noop');
-    expect(getPlayQueueMock).not.toHaveBeenCalled();
+  it('under hub control a background pull takes the queue but does not load the engine', async () => {
+    vi.mocked(preparePausedRestoreOnStartup).mockClear();
+    setIsAudioPaused(true); // the engine still holds the old current track, paused
+    getPlayQueueMock.mockResolvedValue({ songs: ['x', 'y'].map(song), current: 'y', position: 5_000 });
+    resumeIdleQueuePull();
+    clearAllQueuePushFailures();
+    expect(await applyServerPlayQueue('srv', { mode: 'idle', preferServerPosition: true })).toBe('applied');
+
+    expect(queueIds()).toEqual(['x', 'y']);
+    expect(preparePausedRestoreOnStartup).not.toHaveBeenCalled();
+    // The engine no longer holds the current track, so a later takeover must load it (cold).
+    expect(getIsAudioPaused()).toBe(false);
   });
 
   it('when the player cleared its queue, the signal clears it here too', async () => {
@@ -237,6 +248,32 @@ describe('hub client: the player applies queue edits from remotes and saves them
 
     expect(savePlayQueueMock).not.toHaveBeenCalled();
     expect(signals()).toBe(0);
+  });
+
+  it('a remote edit that changes nothing here still signals, so the remote drops what it showed', async () => {
+    latest().receive({ t: 'command', from: 'phone', action: 'moveQueueItems', args: { i: [1], id: ['gone'], gap: 0 } });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(queueIds()).toEqual(['a', 'b', 'c']);
+    expect(signals()).toBe(1);
+  });
+
+  it('a large move arrives as runs of positions', async () => {
+    latest().receive({ t: 'command', from: 'phone', action: 'moveQueueItems', args: { r: [[1, 2]], gap: 0 } });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(queueIds()).toEqual(['b', 'c', 'a']);
+  });
+
+  it('undo from a remote restores the queue but keeps the playing track', async () => {
+    usePlayerStore.setState({ isPlaying: true });
+    latest().receive({ t: 'command', from: 'phone', action: 'clearQueueExceptCurrent', args: null });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(queueIds()).toEqual(['a']);
+    // Meanwhile the player moved on to a track that the snapshot does not hold.
+    usePlayerStore.setState({ queueItems: [{ serverId: 'srv', trackId: 'z' }], queueIndex: 0, currentTrack: track('z') });
+    latest().receive({ t: 'command', from: 'phone', action: 'undoQueue', args: null });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(queueIds()).toEqual(['z', 'a', 'b', 'c']);
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('z');
   });
 
   it('a removal finds its track even after the queue moved, and a stale move is dropped', async () => {

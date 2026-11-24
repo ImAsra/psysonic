@@ -17,13 +17,20 @@ import {
   fingerprintFromServer,
   playQueueFingerprintsEqual,
   applyServerPlayQueue,
-  setIdlePullGate,
+  setIdlePullEngineGate,
 } from '@/features/playback/store/applyServerPlayQueue';
 import {
   clearQueueNaturallyEnded,
   clearQueuePushFailed,
   resumeIdleQueuePull,
 } from '@/features/playback/store/queuePlaybackIdle';
+import {
+  popQueueRedoSnapshot,
+  popQueueUndoSnapshot,
+  pushQueueRedoSnapshot,
+  pushQueueUndoSnapshot,
+  queueUndoSnapshotFromState,
+} from '@/features/playback/store/queueUndo';
 import { getQueueTracksView } from '@/features/playback/store/queueTrackView';
 import {
   getCachedTrack,
@@ -52,8 +59,11 @@ import { currentServerKeys } from './hubServerKeys';
 import { deviceCompatible } from './compat';
 import { hubQueueWindow, resolveQueueMove, resolveQueuePlayIndex } from './hubQueue';
 import {
+  HUB_ARGS_BUDGET,
   chunkIds,
   chunkPositions,
+  fromRuns,
+  toRuns,
   createAddCollector,
   pickQueueRefs,
   positionsStillMatch,
@@ -426,11 +436,6 @@ async function pushQueueAndSignal() {
 }
 
 /**
- * @param emptyClears the player signalled a change: an empty shared queue means it cleared its queue,
- *   so clear here too. On a catch-up an empty shared queue only means nothing is shared yet.
- * @returns true when the local queue now matches the shared one (loaded, already equal, or none shared).
- */
-/**
  * Drop queue entries of music servers that are not set up on this device (left over from a server
  * that was removed). They cannot play here, are not part of the shared queue, and would otherwise
  * stay in the queue next to it. Runs with forceLocal set by the caller, so it is not saved as an edit.
@@ -441,7 +446,7 @@ function dropEntriesOfMissingServers() {
   const known = new Set(servers.map(server => server.id));
   const s = usePlayerStore.getState();
   const keep = s.queueItems.filter(ref =>
-    ref.serverId === NAVIDROME_PUBLIC_SHARE_SERVER_ID || known.has(profileIdFromQueueRef(ref)));
+    !ref.serverId || ref.serverId === NAVIDROME_PUBLIC_SHARE_SERVER_ID || known.has(profileIdFromQueueRef(ref)));
   if (keep.length === s.queueItems.length) return;
   const current = s.queueItems[s.queueIndex];
   const index = current ? keep.indexOf(current) : -1;
@@ -449,6 +454,11 @@ function dropEntriesOfMissingServers() {
   markQueueApplied();
 }
 
+/**
+ * @param emptyClears the player signalled a change: an empty shared queue means it cleared its queue,
+ *   so clear here too. On a catch-up an empty shared queue only means nothing is shared yet.
+ * @returns true when the local queue now matches the shared one (loaded, already equal, or none shared).
+ */
 async function refreshQueueFromServer(emptyClears = false): Promise<boolean> {
   if (!isPlayQueueSyncEnabled()) return true; // nothing is shared, so nothing to catch up with
   if (forceLocal) return false;
@@ -475,7 +485,9 @@ async function refreshQueueFromServer(emptyClears = false): Promise<boolean> {
       // saved and signalled again, and every device would answer every other one.
       forceLocal = true;
       try {
-        applyMappedQueueProjection(mapped, q, profileId, false);
+        // No engine load here: a load still running when a takeover comes would replace the engine
+        // mid-handoff. The takeover loads the engine itself.
+        applyMappedQueueProjection(mapped, q, profileId, false, false);
       } finally {
         forceLocal = false;
       }
@@ -649,6 +661,18 @@ let queueEdits: Promise<unknown> = Promise.resolve();
 const inOrder = (edit: () => unknown) => {
   queueEdits = queueEdits.then(edit).catch(e => console.error('[psysonic-hub] queue edit failed', e));
 };
+/**
+ * A queue edit from a remote. The remote may already show it; when it changes nothing here (the queue
+ * moved on, or the edit did not fit the hub), signal anyway so the remote pulls the real queue.
+ */
+const inOrderEdit = (edit: () => unknown) => inOrder(async () => {
+  const before = usePlayerStore.getState().queueItems;
+  try {
+    await edit();
+  } finally {
+    if (usePlayerStore.getState().queueItems === before) hubSender?.({ t: 'queue-changed' });
+  }
+});
 const addCollector = createAddCollector();
 
 /** Look up the tracks a remote asked to add, on this device's music server. Unknown ids are skipped. */
@@ -679,6 +703,30 @@ async function applyQueueAdd(add: QueueAdd) {
   else p.enqueue(tracks, true);
 }
 
+/**
+ * Undo / redo asked for by a remote: restore the QUEUE only. The normal undo can also restart the
+ * engine on a snapshot's older song; a remote's Ctrl+Z must not change what is playing here, so the
+ * playing track stays in the restored queue.
+ */
+function queueHistoryKeepingTrack(dir: 'undo' | 'redo') {
+  const prior = usePlayerStore.getState();
+  const snap = dir === 'undo' ? popQueueUndoSnapshot() : popQueueRedoSnapshot();
+  if (!snap) return;
+  const putBack = () => (dir === 'undo' ? pushQueueUndoSnapshot(snap) : pushQueueRedoSnapshot(snap));
+  const playingRef = prior.queueItems[prior.queueIndex];
+  const tid = prior.currentTrack?.id;
+  let items = [...snap.queueItems];
+  let idx = tid ? items.findIndex(r => r.trackId === tid) : -1;
+  if (tid && idx < 0) {
+    if (!playingRef || playingRef.trackId !== tid) { putBack(); return; }
+    items = [playingRef, ...items];
+    idx = 0;
+  }
+  const current = queueUndoSnapshotFromState(prior);
+  if (dir === 'undo') pushQueueRedoSnapshot(current); else pushQueueUndoSnapshot(current);
+  usePlayerStore.setState({ queueItems: items, queueIndex: Math.max(0, idx) });
+}
+
 function removeQueuePositions(args: Record<string, unknown> | null) {
   const positions = readPositions(args);
   if (!positions) return;
@@ -691,8 +739,8 @@ function moveQueuePositions(args: Record<string, unknown> | null) {
   if (!Number.isInteger(gap) || (gap as number) < 0) return;
   const items = usePlayerStore.getState().queueItems;
   const positions = readPositions(args);
-  // Large selections travel without track ids (they would not fit); positions alone are trusted then.
-  const indices = positions ? positions.i : Array.isArray(args?.i) ? args.i : null;
+  // Large selections travel without track ids, as runs of positions; positions alone are trusted then.
+  const indices = positions ? positions.i : fromRuns(args?.r);
   if (!indices || !indices.length || !indices.every(n => Number.isInteger(n) && n >= 0 && n < items.length)) return;
   if (positions && !positionsStillMatch(items, positions)) return; // the queue changed meanwhile
   localPlayer().moveQueueItems(indices as number[], gap as number);
@@ -763,8 +811,14 @@ function installRemoteRouting(): () => void {
       const positions = positionsOf(indices);
       if (!positions.length) return;
       const [part, ...more] = chunkPositions(positions);
-      // One command must carry the whole move; without ids a large selection still fits.
-      hubCommand('moveQueueItems', more.length ? { i: positions.map(p => p.i), gap: gapIndex } : { ...part, gap: gapIndex });
+      // One command must carry the whole move. A large selection goes without ids, as runs of
+      // positions; if even that does not fit the hub, the move is not made (nor shown) here.
+      const args = more.length ? { r: toRuns(positions.map(p => p.i)), gap: gapIndex } : { ...part, gap: gapIndex };
+      if (JSON.stringify(args).length > HUB_ARGS_BUDGET) {
+        showToast('That selection is too large to move on the playing device.', 4000, 'error');
+        return;
+      }
+      hubCommand('moveQueueItems', args);
       showHere('moveQueueItems', [indices, gapIndex]);
     },
     clearQueue: () => hubCommand('clearQueue'),
@@ -889,19 +943,19 @@ function applyCommand(action: string, args: Record<string, unknown> | null) {
   const p = localPlayer();
   switch (action) {
     case 'playIndex': return inOrder(() => playQueueIndex(args));
-    case 'moveQueue': return inOrder(() => moveQueueTrack(args));
+    case 'moveQueue': return inOrderEdit(() => moveQueueTrack(args));
     case 'queueAdd': {
       const add = addCollector.take(args); // parts are collected as they arrive
-      if (add) inOrder(() => applyQueueAdd(add));
+      if (add) inOrderEdit(() => applyQueueAdd(add));
       return;
     }
-    case 'removeQueue': return inOrder(() => removeQueuePositions(args));
-    case 'moveQueueItems': return inOrder(() => moveQueuePositions(args));
-    case 'clearQueue': return inOrder(() => p.clearQueue());
-    case 'clearQueueExceptCurrent': return inOrder(() => p.clearQueueExceptCurrent());
-    case 'pruneUpcoming': return inOrder(() => p.pruneUpcomingToCurrent());
-    case 'undoQueue': return inOrder(() => p.undoLastQueueEdit());
-    case 'redoQueue': return inOrder(() => p.redoLastQueueEdit());
+    case 'removeQueue': return inOrderEdit(() => removeQueuePositions(args));
+    case 'moveQueueItems': return inOrderEdit(() => moveQueuePositions(args));
+    case 'clearQueue': return inOrderEdit(() => p.clearQueue());
+    case 'clearQueueExceptCurrent': return inOrderEdit(() => p.clearQueueExceptCurrent());
+    case 'pruneUpcoming': return inOrderEdit(() => p.pruneUpcomingToCurrent());
+    case 'undoQueue': return inOrderEdit(() => queueHistoryKeepingTrack('undo'));
+    case 'redoQueue': return inOrderEdit(() => queueHistoryKeepingTrack('redo'));
     case 'playItem': return void playLibraryItem(args);
     case 'play': return p.resume();
     case 'pause': return p.pause();
@@ -925,8 +979,8 @@ function applyCommand(action: string, args: Record<string, unknown> | null) {
       if (Number.isFinite(v)) p.setVolume(Math.min(1, Math.max(0, v)));
       return;
     }
-    case 'shuffleQueue': return inOrder(() => p.shuffleQueue());
-    case 'shuffleUpcomingQueue': return inOrder(() => p.shuffleUpcomingQueue());
+    case 'shuffleQueue': return inOrderEdit(() => p.shuffleQueue());
+    case 'shuffleUpcomingQueue': return inOrderEdit(() => p.shuffleUpcomingQueue());
     case 'shuffle': {
       if (usePlayerStore.getState().shuffleMode !== (args?.value === true)) p.toggleShuffleMode();
       return;
@@ -1346,10 +1400,10 @@ const syncRemoteRouting = () => {
   });
 
   const removeQueueGate = setQueueServerWriteGate(queueWritesAllowed);
-  // Under hub control the hub announces every queue change, and the player is the only one that
-  // saves. A background pull here would only reload the engine at an older position, and one that
-  // lands during a takeover replaces the engine mid-handoff (it once moved on to the next track).
-  const removeIdlePullGate = setIdlePullGate(() => {
+  // Under hub control a background pull still picks up queues saved outside the hub, but it must not
+  // load the engine: a load that lands during a takeover replaces the engine mid-handoff (it once
+  // moved on to the next track). The takeover loads the engine itself.
+  const removeIdlePullGate = setIdlePullEngineGate(() => {
     const { enabled, joined, status } = useHubStore.getState();
     return !(enabled && joined && status === 'connected');
   });

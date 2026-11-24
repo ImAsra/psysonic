@@ -7,6 +7,8 @@ import {
   pickQueueRefs,
   positionsStillMatch,
   readPositions,
+  toRuns,
+  fromRuns,
 } from './hubQueueEdits';
 
 const ids = (n: number) => Array.from({ length: n }, (_, i) => `track-id-${String(i).padStart(6, '0')}`);
@@ -96,5 +98,23 @@ describe('createAddCollector', () => {
     vi.advanceTimersByTime(20_000);
     // The late part starts a new, incomplete add instead of completing the old one.
     expect(c.take({ batch: 'b', part: 1, parts: 2, mode: 'end', ids: ['b'] })).toBeNull();
+  });
+});
+
+describe('toRuns / fromRuns', () => {
+  it('packs a large contiguous selection into a few runs and back', () => {
+    const indices = [...Array.from({ length: 500 }, (_, i) => i + 10), 700, 702, 703];
+    const runs = toRuns(indices);
+    expect(runs).toEqual([[10, 500], [700, 1], [702, 2]]);
+    expect(JSON.stringify({ r: runs, gap: 0 }).length).toBeLessThan(HUB_ARGS_BUDGET);
+    expect(fromRuns(runs)).toEqual(indices);
+  });
+
+  it('rejects malformed runs', () => {
+    expect(fromRuns(null)).toBeNull();
+    expect(fromRuns([[1]])).toBeNull();
+    expect(fromRuns([[-1, 2]])).toBeNull();
+    expect(fromRuns([[0, 0]])).toBeNull();
+    expect(fromRuns([[0, 10]], 5)).toBeNull();
   });
 });
